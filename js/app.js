@@ -38,7 +38,7 @@
     shadow: { label: "Testspår", emoji: "👥" },
     telegram: { label: "Telegram", emoji: "📨" },
     assets: { label: "Tillgångar", emoji: "🥇" },
-    meme_test: { label: "Meme-test", emoji: "🧪" },
+    meme_test: { label: "Test-pott", emoji: "🧪" },
     newsfeed: { label: "Nyhetsboten", emoji: "📰" },
     social: { label: "X-kollen", emoji: "📣" },
     Du: { label: "Du", emoji: "👤" }
@@ -53,7 +53,7 @@
     { title: "Skydd & portfölj", names: ["rug_guard", "portfolio", "reviewer", "shadow", "telegram"] }
   ];
   const MAJORS = new Set(["SOL", "JUP", "JTO", "BONK", "WIF", "PYTH", "RAY"]);
-  const LANE_LABELS = { memecoins: "Memecoins", majors: "Större coins", gold: "Guld", commodities: "Råvaror", stocks: "Aktier", assets: "Tillgångar", meme_test: "Meme-test" };
+  const LANE_LABELS = { memecoins: "Memecoins", majors: "Större coins", gold: "Guld", commodities: "Råvaror", stocks: "Aktier", assets: "Tillgångar", meme_test: "Test-pott" };
   const APP_NAME = "Moneymaking G";
   const MOOD_LANE_KEY = "MMG_MOOD_LANE";
   const LOCAL_REQ_KEY = "MMG_WATCH_REQUESTS";
@@ -320,7 +320,7 @@
     if (!lanes) return "";
     const keys = [
       ["memecoins", "Memecoins"],
-      ["meme_test", "Meme-test"],
+      ["meme_test", "Test-pott"],
       ["majors", "Större coins"],
       ["assets", "Tillgångar"]
     ];
@@ -364,7 +364,7 @@
   }
 
   function laneFilterRow() {
-    const opts = [["all", "Alla"], ["memecoins", "Memecoins"], ["meme_test", "Meme-test"], ["majors", "Större coins"], ["assets", "Tillgångar"]];
+    const opts = [["all", "Alla"], ["memecoins", "Memecoins"], ["meme_test", "Test-pott"], ["majors", "Större coins"], ["assets", "Tillgångar"]];
     return `<div class="filters lane-filters">
       ${opts.map(([id, lab]) => `<button type="button" data-lane="${id}" class="${state.laneFilter === id ? "on" : ""}">${lab}</button>`).join("")}
     </div>`;
@@ -590,6 +590,26 @@
     return `<a class="btn btn-primary" href="${h(link.url)}" target="_blank" rel="noopener">${h(link.button || ("Öppna på " + link.label))}</a>`;
   }
 
+  function potCard(pot) {
+    if (!pot) return "";
+    const eq = Number(pot.equity_usd || 0);
+    const cash = Number(pot.cash_usd || 0);
+    const open = Number(pot.open_usd || 0);
+    const start = Number(pot.start_usd || 0);
+    const real = Number(pot.realized_usd || 0);
+    const n = Number(pot.open_n || 0);
+    return `<div class="card pot-card">
+      <div class="card-h">Test-pott (meme_test)</div>
+      <div class="row">
+        <div class="row-body">
+          <div class="row-title nums">${h(fmtUsd(eq, { exact: true }))}</div>
+          <div class="row-sub">Kassa ${h(fmtUsd(cash, { exact: true }))} · I spel ${h(fmtUsd(open, { exact: true }))} (${n} öppna) · start ${h(fmtUsd(start, { exact: true }))}</div>
+        </div>
+        <div class="row-meta">${pnlStack(null, real)}</div>
+      </div>
+    </div>`;
+  }
+
   /* ---------- 1. HEM (Portfolio & Positions ONLY) ---------- */
   function renderHome() {
     const d = state.desk;
@@ -621,6 +641,7 @@
           <div class="p-stat"><div class="k">Reserv</div><div class="v nums">${h(resPct)}%</div></div>
         </div>
       </div>
+      ${potCard(d.meme_test_pot)}
       ${window.DeskPages && DeskPages.clockChip ? DeskPages.clockChip(state) : ""}
 
       <div class="segments segments-scroll" data-role="chart-range">
@@ -1520,7 +1541,7 @@
       const lab = labels[c.id] || c.label || c.id;
       return `<div class="rule-check ${c.met ? "ok" : ""}"><span class="mark">${c.met ? "✓" : "○"}</span><span>${h(lab)}</span></div>`;
     }).join("");
-    const laneNames = { memecoin: "Memecoins", meme_test: "Meme-test", majors: "Större coins", gold: "Guld", commodities: "Råvaror", stocks: "Aktier" };
+    const laneNames = { memecoin: "Memecoins", meme_test: "Test-pott", majors: "Större coins", gold: "Guld", commodities: "Råvaror", stocks: "Aktier" };
     const gradLanes = (grad.lanes || []).map((ln) => {
       const name = laneNames[ln.id] || ln.id;
       const pct = ln.progress_pct != null ? Math.round(ln.progress_pct) : null;

@@ -1480,3 +1480,14 @@ a.market-pair:active { opacity: 0.8; }
 .safety-verdict.warn { background: var(--orange-dim, rgba(255,159,10,0.16)); color: var(--orange, #ff9f0a); }
 .safety-why { margin: 8px 0 12px; }
 .safety-card .layer { padding: 10px 16px; }
+
+.pot-card {
+  margin: 0 0 12px;
+}
+.pot-card .row {
+  padding-bottom: 4px;
+}
+.pot-card .row-title {
+  font-size: 18px;
+  font-weight: 750;
+}

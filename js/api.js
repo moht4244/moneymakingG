@@ -8,7 +8,7 @@
  * Endpoints (shapes the UI reads; extra fields are ignored):
  *
  * GET /api/state
- *   { mode:"PAPER"|"LIVE", running, schedule, equity_usd, cash_usd,
+ *   { mode:"PAPER"|"LIVE", running, schedule, equity_usd, cash_usd, meme_test_pot,
  *     positions_value_usd, pnl_today_usd, pnl_today_pct, pnl_total_usd,
  *     pnl_total_pct, market:{ regime, btc:{price,change_24h_pct},
  *     sol:{...}, news }, bots:[{name,label,status,last,ts}],

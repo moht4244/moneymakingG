@@ -559,7 +559,7 @@
   };
 
   function laneName(id) {
-    return ({ memecoin: "Memecoins", meme_test: "Meme-test", majors: "Större coins", gold: "Guld",
+    return ({ memecoin: "Memecoins", meme_test: "Test-pott", majors: "Större coins", gold: "Guld",
       commodities: "Råvaror", stocks: "Aktier", assets: "Tillgångar", global: "Alla" })[id] || id || "—";
   }
 
@@ -709,7 +709,7 @@
       const need = clock.required_days || 60;
       const left = clock.days_left != null ? clock.days_left : Math.max(0, need - days);
       const pct = Math.max(0, Math.min(100, (days / need) * 100));
-      const laneNames = { memecoin: "Memecoins", meme_test: "Meme-test", majors: "Större coins", gold: "Guld", commodities: "Råvaror", stocks: "Aktier" };
+      const laneNames = { memecoin: "Memecoins", meme_test: "Test-pott", majors: "Större coins", gold: "Guld", commodities: "Råvaror", stocks: "Aktier" };
       const items = step.items || [];
       const lanes = grad.lanes || [];
       return `${topbar({ title: "LIVE-krav", back: "#/account", backLabel: "Mer", right: pill(d.mode) })}
