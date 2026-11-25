@@ -312,6 +312,101 @@
     return 100 * (b / a - 1);
   }
 
+
+  function safetyHtml(c, u) {
+    const h = u.h;
+    const s = (c && c.safety) || null;
+    const verdict = (s && s.verdict) || "ej granskad än";
+    const cls = verdict === "godkänd" ? "pass" : (verdict === "underkänd" ? "fail" : "warn");
+    const verdictLabel = ({
+      "godkänd": "Godkänd",
+      "underkänd": "Underkänd",
+      "skannad": "Skannad",
+      "ej granskad än": "Ej granskad än"
+    })[verdict] || verdict;
+    const kind = (s && s.kind) || "";
+    const isMeme = kind === "memecoin" || (c && c.lane && String(c.lane).indexOf("meme") === 0);
+    const checks = (s && s.checks) || [];
+    const signals = (s && s.signals) || [];
+    const reports = (s && s.reports) || [];
+    const score = s && s.score;
+    const minScore = (s && s.min_score) != null ? s.min_score : ((s && s.score && s.score.min_score) != null ? s.score.min_score : 70);
+    const ico = (st) => st === "pass" ? "✓" : (st === "fail" ? "✕" : "?");
+    const stCls = (st) => st === "pass" ? "pass" : (st === "fail" ? "fail" : "warn");
+    const stWord = (st) => st === "pass" ? "Godkänd" : (st === "fail" ? "Underkänd" : "Okänt");
+
+    let checkBlock = "";
+    if (isMeme || checks.length) {
+      if (checks.length) {
+        checkBlock = checks.map((ch, i) => `
+          <div class="layer">
+            <div class="layer-ico ${stCls(ch.status)}">${ico(ch.status)}</div>
+            <div>
+              <div class="layer-name"><span class="layer-n">${i + 1}.</span>${h(ch.name || "")} <span class="tiny muted">${h(stWord(ch.status))}</span></div>
+              ${ch.explain ? `<div class="layer-detail">${h(ch.explain)}</div>` : ""}
+              ${ch.detail ? `<div class="layer-detail">${h(ch.detail)}</div>` : ""}
+            </div>
+          </div>`).join("");
+      } else {
+        checkBlock = `<div class="layer"><div class="layer-ico warn">?</div><div><div class="layer-name">Ej granskad än</div><div class="layer-detail">Ingen säkerhetsrapport finns för den här coinen ännu.</div></div></div>`;
+      }
+    } else {
+      checkBlock = `<div class="tiny" style="padding:12px 16px">Säkerhetslagren (mint, frys, LP, honeypot) gäller memecoins. Här visas signalerna under Varför godkänd.</div>`;
+    }
+
+    let scoreLine = "";
+    if (score && score.value != null) {
+      const ok = score.pass === true || (score.pass == null && Number(score.value) >= Number(minScore));
+      scoreLine = `<div class="row"><div class="row-body"><div class="row-title">Analyst-poäng</div><div class="row-sub">${h(score.reason || "")}</div></div><div class="row-meta nums">${h(String(Math.round(score.value)))} / ${h(String(minScore))}${ok ? "" : ""}</div></div>`;
+    } else if (isMeme) {
+      scoreLine = `<div class="row"><div class="row-body"><div class="row-title">Analyst-poäng</div><div class="row-sub">Ingen poäng sparad</div></div><div class="row-meta nums">— / ${h(String(minScore))}</div></div>`;
+    }
+
+    const whyTitle = verdict === "godkänd" ? "Varför godkänd" : (verdict === "underkänd" ? "Varför den bedömningen" : "Varför den bedömningen");
+    const whyBody = (s && s.summary) ? s.summary : "Ej granskad än.";
+
+    let signalBlock = "";
+    if (signals.length) {
+      const kindSv = { trend: "Trend", humör: "Humör", betyg: "Betyg", marknadsläge: "Marknadsläge", urval: "Urval", "köp": "Köp" };
+      signalBlock = signals.map((sg) => {
+        const label = kindSv[sg.kind] || sg.kind || "Signal";
+        const meta = sg.score != null ? String(Math.round(sg.score)) : (sg.bias || "");
+        return `<div class="who">${h(label)}${sg.bot ? " · " + h(sg.bot) : ""}</div><p>${h(sg.summary || "—")}${meta ? ` <span class="muted nums">${h(String(meta))}</span>` : ""}</p>`;
+      }).join("");
+    }
+
+    const reportSv = { news: "Nyheter", social: "Socialt", whale: "Whale", risk: "Risk" };
+    let reportBlock = "";
+    if (isMeme) {
+      if (reports.length) {
+        reportBlock = `<div class="card thesis"><div class="card-h">Förköpsrapporter</div>` + reports.map((rp) => {
+          return `<div class="who">${h(reportSv[rp.kind] || rp.kind || "Rapport")}${rp.bot ? " · " + h(rp.bot) : ""}</div><p>${h(rp.summary || "—")}</p>`;
+        }).join("") + `</div>`;
+      } else {
+        reportBlock = `<div class="card thesis"><div class="card-h">Förköpsrapporter</div><p>Inga förköpsrapporter för den här coinen än.</p></div>`;
+      }
+    }
+
+    const mintLink = (c && c.mint && String(c.mint).length >= 32)
+      ? `<a class="row" style="margin-top:4px" href="#/audit/${encodeURIComponent(c.mint)}" data-nav="#/audit/${encodeURIComponent(c.mint)}">
+          <div class="row-body"><div class="row-title">Visa hela rapporten</div></div>
+        </a>` : "";
+
+    return `
+      <div class="card safety-card" id="coin-safety">
+        <div class="card-h">Säkerhetskontroll <span class="safety-verdict ${cls}">${h(verdictLabel)}</span></div>
+        ${scoreLine}
+        ${checkBlock}
+      </div>
+      <div class="card thesis safety-why">
+        <div class="card-h">${h(whyTitle)}</div>
+        <p>${h(whyBody)}</p>
+        ${signalBlock}
+      </div>
+      ${reportBlock}
+      ${mintLink}`;
+  }
+
   const DeskCoin = {
     render(state) {
       const u = ui();
@@ -372,6 +467,8 @@
           ${pos.tp_usd != null ? `<div class="row"><div class="row-body"><div class="row-title">Take-profit${pos.tp_done ? " · tagen" : ""}</div></div><div class="row-meta nums">${h(fmtUsd(pos.tp_usd))}</div></div>` : ""}
         </div>` : ""}
 
+        ${safetyHtml(c, u)}
+
         <div class="stats">
           <div class="stat"><div class="k">Börsvärde</div><div class="v nums">${h(fmtUsd(stats.mc_usd))}</div></div>
           <div class="stat"><div class="k">FDV</div><div class="v nums">${h(fmtUsd(stats.fdv_usd))}</div></div>
@@ -387,11 +484,6 @@
         </div>` : (c.thesis ? `<div class="card thesis"><div class="who">Brain · varför</div><p>${h(c.thesis)}</p></div>` : "")}
 
         ${links.length ? `<div class="ext-links">${links.map((l) => `<a class="ext-link" href="${h(l.href)}" target="_blank" rel="noopener">${h(l.label)}</a>`).join("")}</div>` : ""}
-
-        ${c.mint && isMint(c.mint) ? `<a class="row card" style="margin-top:8px" href="#/audit/${encodeURIComponent(c.mint)}" data-nav="#/audit/${encodeURIComponent(c.mint)}">
-          <div class="row-body"><div class="row-title">Visa säkerhetskoll</div><div class="row-sub">Rapport med 8 kontroller</div></div>
-          ${u.svg ? u.svg("chev") : ""}
-        </a>` : ""}
       </div></div>`;
     },
 

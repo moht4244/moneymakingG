@@ -1395,3 +1395,16 @@ a.chat-card:active { opacity: 0.88; }
 .trade-row .row-sub b { color: var(--secondary); font-weight: 650; }
 .market-pair { display: block; color: inherit; }
 a.market-pair:active { opacity: 0.8; }
+
+/* ----- coin safety (Säkerhetskontroll) ----- */
+.safety-card { margin: 12px 0 8px; padding-bottom: 4px; }
+.safety-card .card-h, .safety-why .card-h { display: flex; align-items: center; gap: 8px; }
+.safety-verdict {
+  display: inline-block; margin-left: auto; font-size: 12px; font-weight: 700;
+  letter-spacing: 0.02em; padding: 3px 8px; border-radius: 999px;
+}
+.safety-verdict.pass { background: var(--green-dim); color: var(--green); }
+.safety-verdict.fail { background: var(--red-dim); color: var(--red); }
+.safety-verdict.warn { background: var(--orange-dim, rgba(255,159,10,0.16)); color: var(--orange, #ff9f0a); }
+.safety-why { margin: 8px 0 12px; }
+.safety-card .layer { padding: 10px 16px; }

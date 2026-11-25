@@ -506,7 +506,7 @@
     const reasons = [];
     markers.forEach((m) => { if (m.reason) reasons.push({ ts: m.t, side: m.side, bot: m.bot, text: m.reason }); });
     if (found && (found.thesis || found.reason)) reasons.push({ ts: null, side: "thesis", bot: "brain", text: found.thesis || found.reason });
-    return {
+    const coinObj = {
       mint: resolvedMint,
       symbol: symbol || null, name: name || null, lane, venue: found && found.venue,
       price_usd: price, change_1h: found && found.change_1h, change_24h: change,
@@ -518,15 +518,53 @@
       position: pos, links: links ? { open: links.url, label: links.label, button: links.button } : {},
       empty: !!empty
     };
+    coinObj.safety = safetyOf(id, coinObj);
+    return coinObj;
+  }
+
+  function safetyOf(id, coin) {
+    const pack = (snapCache && snapCache.safety) || {};
+    const mint = (coin && coin.mint) || id;
+    const sym = String((coin && coin.symbol) || "").toUpperCase();
+    const idU = String(id || "").toUpperCase();
+    return (pack.by_mint && mint && pack.by_mint[mint])
+      || (pack.by_symbol && sym && pack.by_symbol[sym])
+      || (pack.by_symbol && pack.by_symbol[idU])
+      || (pack.by_symbol && pack.by_symbol[id])
+      || null;
   }
 
   function auditFromSnap(id) {
     const coin = coinFromSnap(id);
+    const safety = (coin && coin.safety) || safetyOf(id, coin);
+    const checks = (safety && safety.checks) || [];
+    const layers = checks.map((ch, i) => ({
+      id: ch.id || String(i + 1),
+      name: ch.name,
+      explain: ch.explain,
+      pass: ch.status === "pass" ? true : (ch.status === "fail" ? false : null),
+      status: ch.status,
+      detail: ch.detail,
+      source: ch.source
+    }));
+    const empty = !safety || (!checks.length && !safety.summary && !safety.score && !safety.scan && !(safety.signals || []).length);
     return {
-      mint: id, symbol: coin.symbol, name: coin.name, grade: null, notes: null,
-      layers: [], passed: false, empty: true,
-      links: coin.links || {}
+      mint: (coin && coin.mint) || id,
+      symbol: coin && coin.symbol, name: coin && coin.name,
+      grade: safety && safety.verdict,
+      notes: safety && safety.summary,
+      layers: layers,
+      passed: !!(safety && safety.verdict === "godkänd"),
+      empty: !!empty,
+      safety: safety || null,
+      min_score: (safety && safety.min_score) || packMinScore(),
+      links: (coin && coin.links) || {}
     };
+  }
+
+  function packMinScore() {
+    const pack = (snapCache && snapCache.safety) || {};
+    return pack.min_score != null ? pack.min_score : 70;
   }
 
 
