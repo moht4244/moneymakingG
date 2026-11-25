@@ -84,7 +84,10 @@
     return h;
   }
 
-  const SNAP_RAW = "https://raw.githubusercontent.com/moht4244/moneymakingG/data/snap.enc";
+  const SNAP_URLS = [
+    "https://raw.githubusercontent.com/moht4244/moneymakingG/data/snap.enc",
+    "https://cdn.jsdelivr.net/gh/moht4244/moneymakingG@data/snap.enc"
+  ];
   const SNAP_API = "https://api.github.com/repos/moht4244/moneymakingG/contents/snap.enc?ref=data";
   let snapCache = null;
   let snapKey = null;
@@ -123,10 +126,12 @@
   }
 
   async function fetchSnapEnv() {
-    try {
-      const r = await fetch(SNAP_RAW + "?t=" + Date.now(), { cache: "no-store" });
-      if (r.ok) return await r.json();
-    } catch (_) {}
+    for (let i = 0; i < SNAP_URLS.length; i++) {
+      try {
+        const r = await fetch(SNAP_URLS[i] + "?t=" + Date.now(), { cache: "no-store" });
+        if (r.ok) return await r.json();
+      } catch (_) {}
+    }
     const r = await fetch(SNAP_API + "&t=" + Date.now(), { cache: "no-store", headers: { Accept: "application/vnd.github+json" } });
     if (!r.ok) {
       const err = new Error("HTTP " + r.status);
