@@ -378,6 +378,7 @@
     if (u === "/api/risk" || u === "api/risk") return s.risk || (s.state && s.state.risk) || {};
     if (u === "/api/graduation" || u === "api/graduation") return s.graduation || (s.state && s.state.graduation) || {};
     if (u === "/api/live" || u === "api/live") return s.live || s.activity || { items: [] };
+    if (u === "/api/chatter" || u === "api/chatter") return s.chatter || { items: [] };
     const coinM = u.match(/^(?:\/)?api\/coin\/(.+)$/);
     if (coinM) return coinFromSnap(decodeURIComponent(coinM[1]));
     const auditM = u.match(/^(?:\/)?api\/audit\/(.+)$/);
@@ -672,6 +673,10 @@
       return liveGet("/api/live");
     },
 
+    async getChatter() {
+      return liveGet("/api/chatter");
+    },
+
     assetLink,
 
     openStream(handlers) {
@@ -684,6 +689,7 @@
             if (handlers.state) handlers.state(s.state);
             if (handlers.activity && s.activity) handlers.activity(s.activity);
             if (handlers.live && (s.live || s.activity)) handlers.live(s.live || s.activity);
+            if (handlers.chatter && s.chatter) handlers.chatter(s.chatter);
             if (handlers.tick) handlers.tick({ ts: Date.now() });
           }).catch(() => {});
         }, 60000);

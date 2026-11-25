@@ -918,3 +918,45 @@ a.chat-card:active { opacity: 0.88; }
 }
 .ptr.spinning .ptr-spin { animation: ptr-spin 0.7s linear infinite; }
 @keyframes ptr-spin { to { transform: rotate(360deg); } }
+
+/* Live tab bot chat (v14) */
+.live-page .live-lead { margin: 4px 0 10px; }
+.live-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0 20px;
+}
+.live-chat .thread {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0 8px;
+  border-left: 2px solid rgba(255,255,255,.08);
+  margin-left: 13px;
+  padding-left: 10px;
+}
+.live-chat .msg { display: flex; gap: 8px; align-items: flex-start; }
+.live-chat .msg.reply { margin-left: 8px; }
+.live-chat .av { font-size: 20px; width: 28px; text-align: center; flex: none; line-height: 1.2; }
+.live-chat .bubble {
+  background: rgba(255,255,255,.06);
+  border-radius: 14px 14px 14px 4px;
+  padding: 8px 11px;
+  font-size: 14px;
+  line-height: 1.4;
+  max-width: 88%;
+}
+.live-chat .msg.k-question .bubble { background: rgba(10,132,255,.12); }
+.live-chat .msg.k-answer .bubble { background: rgba(48,209,88,.10); }
+.live-chat .msg.k-decision .bubble { background: rgba(255,214,10,.10); }
+.live-chat .msg.k-checkin .bubble { background: rgba(255,255,255,.04); }
+.live-chat .who { display: flex; gap: 8px; align-items: baseline; margin-bottom: 2px; }
+.live-chat .who-name { font-size: 12px; font-weight: 650; color: var(--label); }
+.live-chat .kind-tag {
+  font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .02em;
+  color: var(--secondary); background: rgba(255,255,255,.06); border-radius: 6px; padding: 1px 6px;
+}
+.live-chat .when { margin-left: auto; font-size: 11px; font-weight: 500; color: var(--secondary); }
+.live-chat .bubble-text { white-space: pre-wrap; word-break: break-word; }
+.bot-filters { padding-top: 0; }

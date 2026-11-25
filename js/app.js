@@ -17,8 +17,36 @@
     majors: "#FFB340",
     shadow: "#8E8E93",
     telegram: "#2AABEE",
-    meme_test: "#FF7AD9"
+    meme_test: "#FF7AD9",
+    newsfeed: "#FFD60A",
+    social: "#64D2FF",
+    assets: "#FFD60A"
   };
+  const BOT_META = {
+    scanner: { label: "Scanner", emoji: "🔭" },
+    analyst: { label: "Analyst", emoji: "🧪" },
+    brain: { label: "Brain", emoji: "🧠" },
+    executor: { label: "Executor", emoji: "🤝" },
+    risk: { label: "Risk", emoji: "🛡️" },
+    research: { label: "Research", emoji: "📚" },
+    whale: { label: "Whale", emoji: "🐋" },
+    sentiment: { label: "Sentiment", emoji: "🌡️" },
+    rug_guard: { label: "Rug Guard", emoji: "🚨" },
+    portfolio: { label: "Portfolio", emoji: "🥧" },
+    reviewer: { label: "Reviewer", emoji: "📝" },
+    regime: { label: "Marknadsläge", emoji: "🚦" },
+    majors: { label: "Större coins", emoji: "🏛️" },
+    shadow: { label: "Testspår", emoji: "👥" },
+    telegram: { label: "Telegram", emoji: "📨" },
+    assets: { label: "Tillgångar", emoji: "🥇" },
+    meme_test: { label: "Meme-test", emoji: "🧪" },
+    newsfeed: { label: "Nyhetsboten", emoji: "📰" },
+    social: { label: "X-kollen", emoji: "📣" }
+  };
+  function botMeta(name) {
+    const n = name || "";
+    return BOT_META[n] || { label: n || "Bot", emoji: "🤖" };
+  }
   const BOT_ORDER = [
     "scanner", "analyst", "brain", "executor", "risk", "meme_test",
     "research", "whale", "sentiment",
@@ -46,7 +74,9 @@
     activity: null,
     live: null,
     activityFilter: "all",
+    liveBotFilter: "all",
     laneFilter: "all",
+    chatter: null,
     coin: null,
     audit: null,
     bot: null,
@@ -334,13 +364,53 @@
       </a>`).join("")}</nav>`;
   }
 
+  const PASS_LOCK_KEY = "MMG_PASS_LOCK";
+
+  function readPassLock() {
+    try {
+      const d = JSON.parse(localStorage.getItem(PASS_LOCK_KEY) || "null");
+      if (!d || typeof d !== "object") return { fails: 0, until: 0 };
+      return { fails: Number(d.fails) || 0, until: Number(d.until) || 0 };
+    } catch (_) {
+      return { fails: 0, until: 0 };
+    }
+  }
+
+  function writePassLock(fails, until) {
+    try {
+      if (!fails && !until) localStorage.removeItem(PASS_LOCK_KEY);
+      else localStorage.setItem(PASS_LOCK_KEY, JSON.stringify({ fails, until }));
+    } catch (_) {}
+  }
+
+  function passLockRemainingSec() {
+    const rem = Math.ceil((readPassLock().until - Date.now()) / 1000);
+    return rem > 0 ? rem : 0;
+  }
+
+  function recordPassFail() {
+    const cur = readPassLock();
+    const fails = cur.fails + 1;
+    let waitSec = 0;
+    if (fails >= 5) waitSec = Math.min(300, 30 * Math.pow(2, fails - 5));
+    const until = waitSec ? Date.now() + waitSec * 1000 : 0;
+    writePassLock(fails, until);
+    return { fails, waitSec };
+  }
+
+  function clearPassLock() {
+    writePassLock(0, 0);
+  }
+
   function passcodeForm(err) {
-    const msg = err ? `<p class="lock-error">${h(err)}</p>` : "";
+    const rem = passLockRemainingSec();
+    const shown = rem > 0 ? `För många fel försök. Vänta ${rem} sek och försök igen.` : err;
+    const msg = shown ? `<p class="lock-error">${h(shown)}</p>` : "";
     return `<form data-pass-form class="token-form" autocomplete="off">
-      <input type="password" name="code" autocomplete="current-password" spellcheck="false" placeholder="Din kod" aria-label="Din kod">
+      <input type="password" name="code" minlength="8" autocomplete="current-password" spellcheck="false" placeholder="Din kod" aria-label="Din kod">
       <label class="remember"><input type="checkbox" name="remember"> Kom ihåg på den här enheten</label>
       ${msg}
-      <button type="submit" class="btn btn-primary" data-pass-submit>Öppna</button>
+      <button type="submit" class="btn btn-primary" data-pass-submit ${rem > 0 ? "disabled" : ""}>${rem > 0 ? `Låst (${rem}s)` : "Öppna"}</button>
     </form>`;
   }
 
@@ -901,52 +971,125 @@
 
   function renderActivity() { return renderLive(); }
 
+  function liveChatItems() {
+    const out = [];
+    const seen = new Set();
+    const push = (it) => {
+      if (!it) return;
+      const text = (it.text || it.title || it.body || "").trim();
+      if (!text) return;
+      const id = String(it.id != null ? it.id : text + ":" + (it.ts || ""));
+      if (seen.has(id)) return;
+      seen.add(id);
+      const bot = it.from_bot || it.bot;
+      out.push({
+        id, ts: it.ts, kind: (it.kind || "system"),
+        from_bot: bot, to_bot: it.to_bot, text,
+        thread_id: it.thread_id, mint: it.mint, symbol: it.symbol, lane: it.lane,
+        pnl_usd: it.pnl_usd, pnl_pct: it.pnl_pct
+      });
+    };
+    ((state.chatter && state.chatter.items) || []).forEach(push);
+    ((state.live && state.live.items) || []).forEach(push);
+    ((state.activity && state.activity.items) || []).forEach(push);
+    ((state.fun && state.fun.chat) || []).forEach(push);
+    return out;
+  }
+
+  function liveKindMatch(kind, filter) {
+    const k = String(kind || "").toLowerCase();
+    if (!filter || filter === "all") return true;
+    if (filter === "chat") return k === "question" || k === "answer" || k === "checkin" || k === "decision";
+    if (filter === "trades") return k === "buy" || k === "sell" || k === "bought" || k === "sold" || k === "decision";
+    if (filter === "blocks") return k === "block" || k === "stop" || k === "stopped" || k === "rejected" || k === "guard";
+    return true;
+  }
+
+  function activityFilterMatch(kind, filter) { return liveKindMatch(kind, filter); }
+
+  function liveKindTag(kind) {
+    return ({
+      question: "frågar", answer: "svarar", checkin: "koll", decision: "beslut",
+      buy: "köp", sell: "sälj", stop: "stopp", block: "stopp", news: "nyhet"
+    })[kind] || "";
+  }
+
+  function renderLiveMsg(it, reply) {
+    const meta = botMeta(it.from_bot);
+    const to = it.to_bot ? botMeta(it.to_bot).label : "";
+    const tag = liveKindTag(it.kind);
+    const who = to ? `${meta.label} → ${to}` : meta.label;
+    const cls = `msg${reply ? " reply" : ""}${it.kind ? " k-" + h(it.kind) : ""}`;
+    return `<div class="${cls}" data-bot="${h(it.from_bot || "")}">
+      <span class="av" title="${h(meta.label)}">${meta.emoji}</span>
+      <div class="bubble">
+        <div class="who"><span class="who-name">${h(who)}</span>${tag ? `<span class="kind-tag">${h(tag)}</span>` : ""}<span class="when">${h(sthlmStamp(it.ts) || relTime(it.ts) || "")}</span></div>
+        <div class="bubble-text">${h(it.text)}</div>
+        ${it.pnl_usd != null && (it.kind === "sell" || it.kind === "stop") ? `<div class="chg ${chgClass(it.pnl_usd)} nums">${h(fmtUsd(it.pnl_usd, { exact: true }))}</div>` : ""}
+      </div>
+    </div>`;
+  }
+
   function renderLive() {
-    const raw = ((state.live && state.live.items) || (state.activity && state.activity.items) || []);
+    const raw = liveChatItems();
     if (state.loading && !raw.length) return `${topbar({ title: "Live" })}${skeleton()}`;
     if (state.error && !raw.length) return errorView(state.error);
-    const items = raw
-      .filter((it) => matchesLane(it, state.laneFilter))
-      .filter((it) => activityFilterMatch(it.kind, state.activityFilter))
+    const filtered = raw.filter((it) => liveKindMatch(it.kind, state.activityFilter))
+      .filter((it) => !state.liveBotFilter || state.liveBotFilter === "all" || it.from_bot === state.liveBotFilter || it.to_bot === state.liveBotFilter)
       .slice()
       .sort((x, y) => {
         const ta = parseTs(x && x.ts), tb = parseTs(y && y.ts);
-        return (tb ? tb.getTime() : 0) - (ta ? ta.getTime() : 0);
+        return (ta ? ta.getTime() : 0) - (tb ? tb.getTime() : 0);
       });
-    const filters = [["all", "Alla"], ["trades", "Affärer"], ["blocks", "Stoppade"], ["lessons", "Lärdomar"]];
+    const bots = [];
+    const seen = new Set();
+    raw.forEach((it) => {
+      const b = it.from_bot;
+      if (b && !seen.has(b)) { seen.add(b); bots.push(b); }
+    });
+    const order = ["newsfeed", "social", "analyst", "scanner", "whale", "risk", "meme_test", "majors", "assets"];
+    bots.sort((a, b) => {
+      const ia = order.indexOf(a), ib = order.indexOf(b);
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b);
+    });
+    const kindFilters = [["all", "Alla"], ["chat", "Snack"], ["trades", "Affärer"]];
+    const botChips = [["all", "Alla botar"], ...bots.map((b) => [b, botMeta(b).emoji + " " + botMeta(b).label])];
+    const threads = new Map();
+    const blocks = [];
+    filtered.forEach((it) => {
+      if (it.thread_id) {
+        if (!threads.has(it.thread_id)) {
+          const list = [];
+          threads.set(it.thread_id, list);
+          blocks.push({ type: "thread", id: it.thread_id, list });
+        }
+        threads.get(it.thread_id).push(it);
+      } else {
+        blocks.push({ type: "msg", it });
+      }
+    });
+    const html = blocks.map((b) => {
+      if (b.type === "msg") return renderLiveMsg(b.it, false);
+      const list = b.list.slice().sort((x, y) => {
+        const rank = (k) => k === "question" ? 0 : k === "answer" ? 1 : k === "decision" ? 2 : 3;
+        const d = rank(x.kind) - rank(y.kind);
+        if (d) return d;
+        const ta = parseTs(x.ts), tb = parseTs(y.ts);
+        return (ta ? ta.getTime() : 0) - (tb ? tb.getTime() : 0);
+      });
+      return `<div class="thread">${list.map((it, i) => renderLiveMsg(it, i > 0)).join("")}</div>`;
+    }).join("");
     return `${topbar({ title: "Live", right: pillPaperOrLive(state.desk && state.desk.mode) })}
-    <div class="screen"><div class="page">
-      <p class="live-lead">Senaste köp, sälj och signaler från botarna. Uppdateras varje minut.</p>
+    <div class="screen"><div class="page live-page">
+      <p class="live-lead">Botarna frågar varandra och svarar med riktig data. Uppdateras varje minut.</p>
       <div class="filters">
-        ${filters.map(([id, lab]) => `<button data-filter="${id}" class="${state.activityFilter === id ? "on" : ""}">${lab}</button>`).join("")}
+        ${kindFilters.map(([id, lab]) => `<button data-filter="${id}" class="${state.activityFilter === id ? "on" : ""}">${lab}</button>`).join("")}
       </div>
-      ${laneFilterRow()}
-      ${items.length ? `<div class="card">${items.map((it) => {
-        const kind = it.kind || "system";
-        const tag = ({ buy:"KÖP", sell:"SÄLJ", block:"STOPP", rejected:"SKIP", lesson:"LÄRD", scan:"SKAN", risk:"RISK", research:"RES", whale:"WHALE", sentiment:"STÄMN", guard:"VAKT", portfolio:"PORT", review:"REV", system:"INFO" })[kind] || "INFO";
-        const inner = `
-          <div class="event-kind ${h(kind)}">${tag}</div>
-          <div class="row-body">
-            <div class="row-title">${h(it.title)}${laneChip(laneOf(it))}</div>
-            <div class="row-sub">${h(it.body || "")}</div>
-          </div>
-          <div class="row-meta">
-            <div class="tiny">${h(sthlmStamp(it.ts) || relTime(it.ts))}</div>
-            ${tradePnlMeta(it)}
-          </div>
-          ${assetLinkOf(it) ? svg("chev") : ""}`;
-        return assetRow(it, inner);
-      }).join("")}</div>` : emptyView("Inga händelser än", "Köp, sälj, stopp och lärdomar dyker upp här.")}
+      <div class="filters bot-filters">
+        ${botChips.map(([id, lab]) => `<button data-bot-filter="${h(id)}" class="${(state.liveBotFilter || "all") === id ? "on" : ""}">${h(lab)}</button>`).join("")}
+      </div>
+      ${filtered.length ? `<div class="live-chat" id="chat-feed">${html}</div>` : emptyView("Inget snack än", "När botarna kollar läget eller frågar varandra syns det här.")}
     </div></div>`;
-  }
-
-  function activityFilterMatch(kind, filter) {
-    const k = String(kind || "").toLowerCase();
-    if (!filter || filter === "all") return true;
-    if (filter === "trades") return k === "buy" || k === "sell" || k === "bought" || k === "sold";
-    if (filter === "blocks") return k === "block" || k === "stop" || k === "stopped" || k === "rejected" || k === "guard";
-    if (filter === "lessons") return k === "lesson" || k === "lessons";
-    return true;
   }
 
   const KIND_SV = { buy:"KÖP", sell:"SÄLJ", stop:"STOPP", block:"STOPP", rejected:"SKIP", lesson:"LÄRD",
@@ -977,7 +1120,7 @@
       return assetRow(it, inner);
     }).join("") : `<div class="state" style="padding:20px 16px"><p>Inga händelser än</p></div>`;
     return `<div class="card" id="live-feed">
-      <div class="card-h">Live</div>
+      <div class="card-h">Senaste händelser <a class="link" href="#/live" data-nav="#/live">Visa alla</a></div>
       <p class="live-lead">Senaste köp, sälj och signaler från botarna. Uppdateras varje minut.</p>
       ${rows}
     </div>`;
@@ -1324,14 +1467,16 @@
     try {
       if (typeof DeskAPI.refreshSnap === "function") await DeskAPI.refreshSnap();
       else if (typeof DeskAPI.loadSnap === "function") await DeskAPI.loadSnap();
-      const [desk, live, act] = await Promise.all([
+      const [desk, live, act, ch] = await Promise.all([
         DeskAPI.getState().catch(() => null),
         DeskAPI.getLive ? DeskAPI.getLive().catch(() => null) : null,
-        DeskAPI.getActivity({ kind: state.activityFilter }).catch(() => null)
+        DeskAPI.getActivity({ kind: state.activityFilter }).catch(() => null),
+        DeskAPI.getChatter ? DeskAPI.getChatter().catch(() => null) : null
       ]);
       if (desk) state.desk = desk;
       if (live) state.live = live;
       if (act) state.activity = act;
+      if (ch) state.chatter = ch;
       await loadFun();
       render({ keepScroll: true });
       ptrSetSheet(PTR_HOLD, false);
@@ -1489,14 +1634,16 @@
       if (r.name === "activity" || r.name === "live") {
         state.loading = true;
         render();
-        const [act, live] = await Promise.all([
+        const [act, live, ch] = await Promise.all([
           DeskAPI.getActivity({ kind: state.activityFilter }).catch(() => null),
-          DeskAPI.getLive ? DeskAPI.getLive().catch(() => null) : null
+          DeskAPI.getLive ? DeskAPI.getLive().catch(() => null) : null,
+          DeskAPI.getChatter ? DeskAPI.getChatter().catch(() => null) : null
         ]);
         if (act) state.activity = act;
         if (live) state.live = live;
+        if (ch) state.chatter = ch;
         state.loading = false;
-        render();
+        render({ keepScroll: false });
         return;
       }
       if (r.name === "coin") {
@@ -1563,6 +1710,12 @@
     const form = e.target.closest("[data-pass-form]");
     if (!form) return;
     e.preventDefault();
+    const rem = passLockRemainingSec();
+    if (rem > 0) {
+      state.lockError = `För många fel försök. Vänta ${rem} sek och försök igen.`;
+      render({ keepScroll: false });
+      return;
+    }
     const input = form.querySelector("[name=code]");
     const remember = !!(form.querySelector("[name=remember]") && form.querySelector("[name=remember]").checked);
     const val = input && input.value ? String(input.value) : "";
@@ -1575,6 +1728,7 @@
     if (btn) { btn.disabled = true; btn.textContent = "Kollar koden…"; }
     state.lockError = null;
     DeskAPI.unlockWithPasscode(val, remember).then(() => {
+      clearPassLock();
       if (input) input.value = "";
       state.error = null;
       state.loading = true;
@@ -1582,9 +1736,14 @@
       render({ keepScroll: false });
       loadRoute();
     }).catch((err) => {
-      state.lockError = (err && err.code === "bad_passcode")
-        ? "Fel kod. Försök igen."
-        : "Kunde inte öppna just nu. Försök igen om en stund.";
+      if (err && err.code === "bad_passcode") {
+        const res = recordPassFail();
+        state.lockError = res.waitSec > 0
+          ? `För många fel försök. Vänta ${res.waitSec} sek och försök igen.`
+          : "Fel kod. Försök igen.";
+      } else {
+        state.lockError = "Kunde inte öppna just nu. Försök igen om en stund.";
+      }
       render({ keepScroll: false });
     });
   });
@@ -1647,6 +1806,14 @@
       updateChartRange(range.getAttribute("data-range"));
       return;
     }
+    const botFilter = e.target.closest("[data-bot-filter]");
+    if (botFilter) {
+      e.preventDefault();
+      if (botFilter.blur) botFilter.blur();
+      state.liveBotFilter = botFilter.getAttribute("data-bot-filter") || "all";
+      render({ keepScroll: true });
+      return;
+    }
     const filter = e.target.closest("[data-filter]");
     if (filter) {
       e.preventDefault();
@@ -1674,7 +1841,7 @@
       e.preventDefault();
       if (DeskAPI.logout) DeskAPI.logout();
       state.desk = null; state.fun = null; state.chart = null; state.movers = null;
-      state.live = null; state.activity = null;
+      state.live = null; state.activity = null; state.chatter = null;
       state.error = null; state.lockError = null;
       render({ keepScroll: false });
       return;
@@ -1725,6 +1892,7 @@
       state(s) { state.desk = Object.assign(state.desk || {}, s); render({ keepScroll: true }); },
       activity(a) { if (a) { state.activity = a; if (state.route.name === "activity" || state.route.name === "live") render({ keepScroll: true }); } },
       live(a) { if (a) { state.live = a; if (state.route.name === "home" || state.route.name === "live") render({ keepScroll: true }); } },
+      chatter(a) { if (a) { state.chatter = a; if (state.route.name === "live") render({ keepScroll: true }); } },
       tick() { /* snapshot poll refreshes Live-flödet varje minut */ }
     });
   };
