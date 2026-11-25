@@ -9,18 +9,52 @@
   <meta name="apple-mobile-web-app-title" content="Moneymaking G">
   <meta name="theme-color" content="#000000">
   <meta name="format-detection" content="telephone=no">
+  <meta name="mmg-build" content="v8-20261125">
   <meta name="description" content="Moneymaking G — dina trading-botar – status för PAPER och LIVE.">
   <title>Moneymaking G</title>
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
-  <link rel="stylesheet" href="css/app.css?v=7">
+  <link rel="stylesheet" href="css/app.css?v=8">
+  <script>
+    window.MMG_BUILD = "v8-20261125";
+    (function () {
+      var BUILD = window.MMG_BUILD;
+      function upgrade(id) {
+        var going = sessionStorage.getItem("mmg-upgrading");
+        if (going === id) return;
+        try { sessionStorage.setItem("mmg-upgrading", id); } catch (e) {}
+        var done = Promise.resolve();
+        try {
+          if (window.caches) done = caches.keys().then(function (keys) { return Promise.all(keys.map(function (k) { return caches.delete(k); })); });
+        } catch (e) {}
+        Promise.resolve(done).then(function () {
+          if (!navigator.serviceWorker) return;
+          return navigator.serviceWorker.getRegistrations().then(function (rs) {
+            return Promise.all(rs.map(function (r) { return r.unregister(); }));
+          });
+        }).then(function () {
+          var u = new URL(location.href);
+          u.searchParams.set("v", id);
+          location.replace(u.toString());
+        }).catch(function () { location.reload(); });
+      }
+      function check() {
+        fetch("version.txt?t=" + Date.now(), { cache: "no-store" }).then(function (r) { return r.ok ? r.text() : ""; }).then(function (txt) {
+          var id = String(txt || "").trim();
+          if (id && id !== BUILD) upgrade(id);
+          else { try { sessionStorage.removeItem("mmg-upgrading"); } catch (e) {} }
+        }).catch(function () {});
+      }
+      check();
+    })();
+  </script>
 </head>
 <body>
   <div id="app"></div>
-  <script src="js/charts.js?v=7"></script>
-  <script src="js/api.js?v=7"></script>
-  <script src="js/fun.js?v=7"></script>
-  <script src="js/app.js?v=7"></script>
+  <script src="js/charts.js?v=8"></script>
+  <script src="js/api.js?v=8"></script>
+  <script src="js/fun.js?v=8"></script>
+  <script src="js/app.js?v=8"></script>
 </body>
 </html>

@@ -1,5 +1,5 @@
 /* Moneymaking G service worker — network-first for the shell (index + JS), cache-first for assets */
-const CACHE = "moneymaking-g-v7";
+const CACHE = "moneymaking-g-v8";
 const PRECACHE = [
   "./css/app.css",
   "./sounds/kaching.wav",
@@ -21,6 +21,8 @@ self.addEventListener("activate", (event) => {
     caches.keys().then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
       .then(() => caches.open(CACHE).then((cache) => cache.addAll(PRECACHE)))
       .then(() => self.clients.claim())
+      .then(() => self.clients.matchAll({ type: "window", includeUncontrolled: true }))
+      .then((clients) => Promise.all(clients.map((c) => { try { return c.navigate(c.url); } catch (_) { return null; } })))
   );
 });
 
@@ -32,7 +34,7 @@ function isShell(request, url) {
   const dest = request.destination;
   if (dest === "script" || dest === "document") return true;
   const path = url.pathname;
-  return /\/index\.html$|\/sw\.js$|\/js\/[^/]+\.js$|\/$/.test(path);
+  return /\/index\.html$|\/sw\.js$|\/js\/[^/]+\.js$|\/version\.txt$|\/$/.test(path);
 }
 
 self.addEventListener("fetch", (event) => {

@@ -84,9 +84,13 @@
     return h;
   }
 
+  // raw.githubusercontent.com 404s in some browsers (Chrome/iOS). Prefer CORS CDNs.
   const SNAP_URLS = [
-    "https://raw.githubusercontent.com/moht4244/moneymakingG/data/snap.enc",
-    "https://cdn.jsdelivr.net/gh/moht4244/moneymakingG@data/snap.enc"
+    "https://cdn.jsdelivr.net/gh/moht4244/moneymakingG@data/snap.enc",
+    "https://fastly.jsdelivr.net/gh/moht4244/moneymakingG@data/snap.enc",
+    "https://gcore.jsdelivr.net/gh/moht4244/moneymakingG@data/snap.enc",
+    "https://cdn.jsdmirror.com/gh/moht4244/moneymakingG@data/snap.enc",
+    "https://raw.githack.com/moht4244/moneymakingG/data/snap.enc"
   ];
   const SNAP_API = "https://api.github.com/repos/moht4244/moneymakingG/contents/snap.enc?ref=data";
   let snapCache = null;
@@ -125,14 +129,33 @@
     return btoa(s);
   }
 
+  async function fetchJsonCors(url, opts) {
+    const ctrl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => { try { ctrl.abort(); } catch (_) {} }, 12000) : 0;
+    try {
+      const r = await fetch(url, Object.assign({ cache: "no-store", mode: "cors", signal: ctrl && ctrl.signal }, opts || {}));
+      return r;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  function looksLikeSnap(env) {
+    return !!(env && env.v && env.ct && env.iv && env.salt);
+  }
+
   async function fetchSnapEnv() {
+    const bust = "t=" + Date.now();
     for (let i = 0; i < SNAP_URLS.length; i++) {
       try {
-        const r = await fetch(SNAP_URLS[i] + "?t=" + Date.now(), { cache: "no-store" });
-        if (r.ok) return await r.json();
+        const base = SNAP_URLS[i];
+        const r = await fetchJsonCors(base + (base.indexOf("?") >= 0 ? "&" : "?") + bust);
+        if (!r || !r.ok) continue;
+        const env = await r.json();
+        if (looksLikeSnap(env)) return env;
       } catch (_) {}
     }
-    const r = await fetch(SNAP_API + "&t=" + Date.now(), { cache: "no-store", headers: { Accept: "application/vnd.github+json" } });
+    const r = await fetchJsonCors(SNAP_API + "&" + bust, { headers: { Accept: "application/vnd.github+json" } });
     if (!r.ok) {
       const err = new Error("HTTP " + r.status);
       err.status = r.status;
@@ -277,7 +300,7 @@
     const q = {};
     const qi = path.indexOf("?");
     if (qi >= 0) new URLSearchParams(path.slice(qi + 1)).forEach((v, k) => { q[k] = v; });
-    if (u === "/api/state" || u === "api/state") return s.state;
+    if (u === "/api/state" || u === "api/state") return s.state || {};
     if (u === "/api/fun" || u === "api/fun") return s.fun || {};
     if (u === "/api/ticker" || u === "api/ticker") return s.ticker || { items: [] };
     if (u === "/api/lanes" || u === "api/lanes") return s.lanes || {};
@@ -486,21 +509,39 @@
     return null;
   }
 
+  function emptyFromSnap(path) {
+    const u = String(path || "").split("?")[0];
+    const coinM = u.match(/^(?:\/)?api\/coin\/(.+)$/);
+    if (coinM) return coinFromSnap(decodeURIComponent(coinM[1]));
+    const auditM = u.match(/^(?:\/)?api\/audit\/(.+)$/);
+    if (auditM) return auditFromSnap(decodeURIComponent(auditM[1]));
+    if (u.indexOf("/api/bots/") === 0 || u.indexOf("api/bots/") === 0) {
+      const parts = u.split("/").filter(Boolean);
+      const name = decodeURIComponent(parts[parts.indexOf("bots") + 1] || "");
+      return { name, label: name, status: "idle", description: "", decisions: [] };
+    }
+    if (u.indexOf("chart") >= 0) return { range: "today", points: [] };
+    if (u.indexOf("movers") >= 0) return { range: "today", items: [] };
+    if (u.indexOf("activity") >= 0 || u.indexOf("live") >= 0) return { items: [] };
+    if (u.indexOf("ticker") >= 0) return { items: [] };
+    if (u.indexOf("fun") >= 0) return { mode: "PAPER", leaderboard: [], streak: { current: 0, best: 0 }, badges: [], week: {}, meme: null, chat: [], mood: null, wins: [] };
+    if (u.indexOf("lanes") >= 0) return { health: null, history: [] };
+    return {};
+  }
+
   async function liveGet(path) {
-    if (isUnlocked()) {
+    // Hosted GitHub Pages has no /api/* — never fetch it (that is a real 404).
+    if (onHostedPages() || isUnlocked()) {
+      if (onHostedPages() && !isUnlocked()) {
+        const err = new Error("HTTP 401");
+        err.status = 401;
+        throw err;
+      }
       startSnapRefresh();
       if (!snapCache) await loadSnap();
       const hit = fromSnap(path);
       if (hit != null) return hit;
-      if (onHostedPages()) {
-        const err = new Error("HTTP 404");
-        err.status = 404;
-        throw err;
-      }
-    } else if (onHostedPages()) {
-      const err = new Error("HTTP 401");
-      err.status = 401;
-      throw err;
+      return emptyFromSnap(path);
     }
     const res = await fetch(apiUrl(path), { headers: headers(), cache: "no-store" });
     if (!res.ok) {
@@ -529,6 +570,7 @@
       return liveGet("/api/lanes");
     },
     async undoLane(id) {
+      if (onHostedPages()) return { ok: false, reason: "hosted" };
       const res = await fetch(apiUrl("/api/lanes/" + id + "/undo"), { method: "POST", headers: headers() });
       if (!res.ok) throw new Error("HTTP " + res.status);
       return res.json();

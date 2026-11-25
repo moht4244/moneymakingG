@@ -60,7 +60,7 @@
     const parts = h.replace(/^\//, "").split("/").filter(Boolean);
     const a = parts[0];
     if (a === "home") return { name: "home" };
-    if (a === "activity") return { name: "activity" };
+    if (a === "activity" || a === "live" || a === "handelser") return { name: "live" };
     if (a === "account") return { name: "account" };
     if (a === "bots" && parts[1]) return { name: "bot", bot: decodeURIComponent(parts[1]) };
     if (a === "bots") return { name: "bots" };
@@ -251,8 +251,8 @@
     if (!active) return "";
     const tabs = [
       ["home", "Hem", "home"],
+      ["live", "Live", "activity"],
       ["bots", "Botar", "bots"],
-      ["activity", "Händelser", "activity"],
       ["account", "Konto", "account"]
     ];
     return `<nav class="tabbar">${tabs.map(([id, label, icon]) => `
@@ -542,6 +542,8 @@
           <span class="sub chg ${chgClass(d.pnl_today_pct)} nums">${h(fmtPct(d.pnl_today_pct))}</span>
         </div>
       </section>
+      ${riskMeter(d && d.risk)}
+      ${liveFeedCard()}
       ${window.DeskFun && state.fun ? DeskFun.mood(state.fun.mood) : ""}
       ${window.DeskFun ? DeskFun.laneGauge(state.lanes) : ""}
       <div class="segments segments-scroll" data-role="chart-range">
@@ -597,7 +599,6 @@
           <span><b>${h((lanes.gold && lanes.gold.pct) || 0)}%</b> Guld</span>
         </div>
       </div>` : ""}
-      ${riskMeter(d && d.risk)}
 
       ${laneFilterRow()}
 
@@ -639,8 +640,6 @@
             </div>
           </div>`).join("")}
       </div>` : ""}
-
-      ${liveFeedCard()}
     </div></div>`;
   }
 
@@ -817,17 +816,24 @@
     </div></div>`;
   }
 
-  function renderActivity() {
-    if (state.loading && !state.activity) return `${topbar({ title: "Händelser" })}${skeleton()}`;
-    if (state.error && !state.activity) return errorView(state.error);
-    const items = ((state.activity && state.activity.items) || [])
+  function renderActivity() { return renderLive(); }
+
+  function renderLive() {
+    const raw = ((state.live && state.live.items) || (state.activity && state.activity.items) || []);
+    if (state.loading && !raw.length) return `${topbar({ title: "Live" })}${skeleton()}`;
+    if (state.error && !raw.length) return errorView(state.error);
+    const items = raw
       .filter((it) => matchesLane(it, state.laneFilter))
       .filter((it) => activityFilterMatch(it.kind, state.activityFilter))
       .slice()
-      .sort((x, y) => ((parseTs(y.ts) || 0) - (parseTs(x.ts) || 0)));
+      .sort((x, y) => {
+        const ta = parseTs(x && x.ts), tb = parseTs(y && y.ts);
+        return (tb ? tb.getTime() : 0) - (ta ? ta.getTime() : 0);
+      });
     const filters = [["all", "Alla"], ["trades", "Affärer"], ["blocks", "Stoppade"], ["lessons", "Lärdomar"]];
-    return `${topbar({ title: "Händelser", right: pillPaperOrLive(state.desk && state.desk.mode) })}
+    return `${topbar({ title: "Live", right: pillPaperOrLive(state.desk && state.desk.mode) })}
     <div class="screen"><div class="page">
+      <p class="live-lead">Senaste köp, sälj och signaler från botarna. Uppdateras varje minut.</p>
       <div class="filters">
         ${filters.map(([id, lab]) => `<button data-filter="${id}" class="${state.activityFilter === id ? "on" : ""}">${lab}</button>`).join("")}
       </div>
@@ -1027,6 +1033,7 @@
         </div>
         ${window.DeskFun ? DeskFun.soundToggle() : ""}
         <a class="row" href="#/regler" data-nav="#/regler"><div class="row-body"><div class="row-title">Regler</div><div class="row-sub">Så här skyddas kontot</div></div>${svg("chev")}</a>
+        <div class="row"><div class="row-body"><div class="row-title">Version</div><div class="row-sub">v8 · 25 nov 2026</div></div></div>
       </div>
 
       ${window.DeskFun ? DeskFun.laneHistory(state.lanes) : ""}
@@ -1056,7 +1063,7 @@
   function tabFor(route) {
     if (route.name === "chat") return ""; // full-screen chat, no tab bar
     if (route.name === "bots" || route.name === "bot") return "bots";
-    if (route.name === "activity") return "activity";
+    if (route.name === "activity" || route.name === "live") return "live";
     if (route.name === "account" || route.name === "regler") return "account";
     return "home";
   }
@@ -1091,7 +1098,7 @@
     else if (route.name === "chat") body = renderChat();
     else if (route.name === "bots") body = renderBots();
     else if (route.name === "bot") body = renderBot();
-    else if (route.name === "activity") body = renderActivity();
+    else if (route.name === "activity" || route.name === "live") body = renderLive();
     else if (route.name === "regler") body = renderRegler();
     else if (route.name === "account") body = renderAccount();
     else body = renderHome();
@@ -1169,7 +1176,7 @@
       if (live) state.live = live;
       if (act) state.activity = act;
       await loadFun();
-      if (["home", "bots", "account", "chat", "regler", "activity"].includes(state.route.name)) {
+      if (["home", "bots", "account", "chat", "regler", "activity", "live"].includes(state.route.name)) {
         render({ keepScroll: true });
       }
     } catch (_) {}
@@ -1207,11 +1214,15 @@
         render({ keepScroll: false });
         return;
       }
-      if (r.name === "activity") {
+      if (r.name === "activity" || r.name === "live") {
         state.loading = true;
-        state.activity = null;
         render();
-        state.activity = await DeskAPI.getActivity({ kind: state.activityFilter });
+        const [act, live] = await Promise.all([
+          DeskAPI.getActivity({ kind: state.activityFilter }).catch(() => null),
+          DeskAPI.getLive ? DeskAPI.getLive().catch(() => null) : null
+        ]);
+        if (act) state.activity = act;
+        if (live) state.live = live;
         state.loading = false;
         render();
         return;
@@ -1420,7 +1431,7 @@
   window.addEventListener("resize", () => afterPaint());
 
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("./sw.js").then((reg) => { try { reg.update(); } catch (_) {} }).catch(() => {});
+    navigator.serviceWorker.register("./sw.js", { updateViaCache: "none" }).then((reg) => { try { reg.update(); } catch (_) {} }).catch(() => {});
     let refreshing = false;
     navigator.serviceWorker.addEventListener("controllerchange", () => {
       if (refreshing) return;
@@ -1436,8 +1447,8 @@
     loadRoute();
     DeskAPI.openStream({
       state(s) { state.desk = Object.assign(state.desk || {}, s); render({ keepScroll: true }); },
-      activity(a) { if (a) { state.activity = a; if (state.route.name === "activity") render({ keepScroll: true }); } },
-      live(a) { if (a) { state.live = a; if (state.route.name === "home") render({ keepScroll: true }); } },
+      activity(a) { if (a) { state.activity = a; if (state.route.name === "activity" || state.route.name === "live") render({ keepScroll: true }); } },
+      live(a) { if (a) { state.live = a; if (state.route.name === "home" || state.route.name === "live") render({ keepScroll: true }); } },
       tick() { /* snapshot poll refreshes Live-flödet varje minut */ }
     });
   };

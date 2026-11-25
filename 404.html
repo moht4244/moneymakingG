@@ -2,25 +2,29 @@
 <html lang="sv">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Moneymaking G">
-  <meta name="theme-color" content="#000000">
-  <meta name="format-detection" content="telephone=no">
-  <meta name="description" content="Moneymaking G — dina trading-botar – status för PAPER och LIVE.">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Moneymaking G</title>
-  <link rel="manifest" href="manifest.json">
-  <link rel="apple-touch-icon" href="apple-touch-icon.png">
-  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
-  <link rel="stylesheet" href="css/app.css">
+  <script>
+    (function () {
+      var path = location.pathname || "";
+      var m = path.match(/^(.*\/moneymakingG)(?:\/|$)/i);
+      var root = (m ? m[1] : path.replace(/\/[^/]*$/, "") || "") + "/";
+      var hash = "#/home";
+      var coin = path.match(/\/coin\/([^/]+)/);
+      var audit = path.match(/\/audit\/([^/]+)/);
+      var bots = path.match(/\/bots\/([^/]+)/);
+      if (coin) hash = "#/coin/" + coin[1];
+      else if (audit) hash = "#/audit/" + audit[1];
+      else if (bots) hash = "#/bots/" + bots[1];
+      else if (/\/live\/?$/i.test(path)) hash = "#/live";
+      else if (/\/(activity|handelser)\/?$/i.test(path)) hash = "#/live";
+      else if (/\/(regler|rules)\/?$/i.test(path)) hash = "#/regler";
+      else if (/\/chat\/?/i.test(path)) hash = "#/chat";
+      location.replace(root + hash);
+    })();
+  </script>
 </head>
 <body>
-  <div id="app"></div>
-  <script src="js/charts.js"></script>
-  <script src="js/api.js"></script>
-  <script src="js/fun.js"></script>
-  <script src="js/app.js"></script>
+  <p><a href="./">Öppna Moneymaking G</a></p>
 </body>
 </html>
