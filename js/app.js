@@ -40,7 +40,8 @@
     assets: { label: "Tillgångar", emoji: "🥇" },
     meme_test: { label: "Meme-test", emoji: "🧪" },
     newsfeed: { label: "Nyhetsboten", emoji: "📰" },
-    social: { label: "X-kollen", emoji: "📣" }
+    social: { label: "X-kollen", emoji: "📣" },
+    Du: { label: "Du", emoji: "👤" }
   };
   function botMeta(name) {
     const n = name || "";
@@ -872,25 +873,39 @@
 
   function openTelegramCmd(cmd) {
     const bot = telegramBotName();
+    const text = String(cmd || "");
     try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(cmd).catch(() => {});
+      if (text && navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).catch(() => {});
       }
     } catch (_) {}
-    const url = "https://t.me/" + encodeURIComponent(bot) + "?text=" + encodeURIComponent(cmd);
+    const q = text ? ("?text=" + encodeURIComponent(text)) : "";
+    const httpsUrl = "https://t.me/" + encodeURIComponent(bot) + q;
+    const tgUrl = "tg://resolve?domain=" + encodeURIComponent(bot) + (text ? ("&text=" + encodeURIComponent(text)) : "");
     try {
-      const w = window.open(url, "_blank", "noopener");
-      if (!w) {
-        const a = document.createElement("a");
-        a.href = url;
-        a.target = "_blank";
-        a.rel = "noopener";
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-      }
+      const a = document.createElement("a");
+      a.href = tgUrl;
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
     } catch (_) {}
-    return url;
+    setTimeout(() => {
+      try {
+        if (document.visibilityState && document.visibilityState !== "visible") return;
+        const w = window.open(httpsUrl, "_blank", "noopener");
+        if (!w) {
+          const a = document.createElement("a");
+          a.href = httpsUrl;
+          a.target = "_blank";
+          a.rel = "noopener";
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+        }
+      } catch (_) {}
+    }, 700);
+    return httpsUrl;
   }
 
   function quoteForWatchItem(r) {
@@ -1050,13 +1065,14 @@
   function liveKindMatch(kind, filter) {
     const k = String(kind || "").toLowerCase();
     if (!filter || filter === "all") return true;
-    if (filter === "chat") return k === "question" || k === "answer" || k === "checkin" || k === "decision";
+    if (filter === "chat") return k === "question" || k === "answer" || k === "checkin" || k === "decision" || k === "owner_chat";
     if (filter === "trades") return k === "buy" || k === "sell" || k === "bought" || k === "sold" || k === "decision";
     if (filter === "blocks") return k === "block" || k === "stop" || k === "stopped" || k === "rejected" || k === "guard";
     return true;
   }
 
-  function liveKindTag(kind) {
+  function liveKindTag(kind, fromBot) {
+    if (kind === "owner_chat") return fromBot === "Du" ? "du" : "svarar";
     return ({
       question: "frågar", answer: "svarar", checkin: "koll", decision: "beslut",
       buy: "köp", sell: "sälj", stop: "stopp", block: "stopp", news: "nyhet"
@@ -1065,10 +1081,11 @@
 
   function renderLiveMsg(it, reply) {
     const meta = botMeta(it.from_bot);
-    const to = it.to_bot ? botMeta(it.to_bot).label : "";
-    const tag = liveKindTag(it.kind);
+    const isOwner = it.from_bot === "Du";
+    const to = it.to_bot && !isOwner ? botMeta(it.to_bot).label : "";
+    const tag = liveKindTag(it.kind, it.from_bot);
     const who = to ? `${meta.label} → ${to}` : meta.label;
-    const cls = `msg${reply ? " reply" : ""}${it.kind ? " k-" + h(it.kind) : ""}`;
+    const cls = `msg${reply ? " reply" : ""}${it.kind ? " k-" + h(it.kind) : ""}${isOwner ? " from-owner" : ""}`;
     return `<div class="${cls}" data-bot="${h(it.from_bot || "")}">
       <span class="av" title="${h(meta.label)}">${meta.emoji}</span>
       <div class="bubble">
@@ -1089,7 +1106,7 @@
       .slice()
       .sort((x, y) => {
         const ta = parseTs(x && x.ts), tb = parseTs(y && y.ts);
-        return (ta ? ta.getTime() : 0) - (tb ? tb.getTime() : 0);
+        return (tb ? tb.getTime() : 0) - (ta ? ta.getTime() : 0);
       });
     const bots = [];
     const seen = new Set();
@@ -1097,7 +1114,7 @@
       const b = it.from_bot;
       if (b && !seen.has(b)) { seen.add(b); bots.push(b); }
     });
-    const order = ["newsfeed", "social", "analyst", "scanner", "whale", "risk", "meme_test", "majors", "assets"];
+    const order = ["Du", "newsfeed", "social", "analyst", "scanner", "whale", "risk", "meme_test", "majors", "assets"];
     bots.sort((a, b) => {
       const ia = order.indexOf(a), ib = order.indexOf(b);
       return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b);
@@ -1132,6 +1149,7 @@
     return `${topbar({ title: "Live", right: pillPaperOrLive(state.desk && state.desk.mode) })}
     <div class="screen"><div class="page live-page">
       <p class="live-lead">Botarna frågar varandra och svarar med riktig data. Uppdateras varje minut.</p>
+      <button type="button" class="btn btn-primary talk-bots-btn" data-talk-bots="">Prata med bottarna</button>
       <div class="filters">
         ${kindFilters.map(([id, lab]) => `<button data-filter="${id}" class="${state.activityFilter === id ? "on" : ""}">${lab}</button>`).join("")}
       </div>
@@ -1846,7 +1864,7 @@
     const eq = document.getElementById("equity-chart");
     if (eq && state.chart && state.chart.points) DeskCharts.drawEquity(eq, state.chart.points);
     const feed = document.getElementById("chat-feed");
-    if (feed && state.route.name === "live") feed.scrollTop = feed.scrollHeight;
+    if (feed && state.route.name === "live") feed.scrollTop = 0;
     if (state.route.name === "coin" && window.DeskCoin && DeskCoin.mount) DeskCoin.mount(state);
   }
 
@@ -2478,6 +2496,12 @@
       e.preventDefault();
       if (range.blur) range.blur();
       updateChartRange(range.getAttribute("data-range"));
+      return;
+    }
+    const talkBtn = e.target.closest("[data-talk-bots]");
+    if (talkBtn) {
+      e.preventDefault();
+      openTelegramCmd(talkBtn.getAttribute("data-talk-bots") || "");
       return;
     }
     const botFilter = e.target.closest("[data-bot-filter]");

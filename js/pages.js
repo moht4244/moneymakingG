@@ -490,6 +490,7 @@
         </div>` : (c.thesis ? `<div class="card thesis"><div class="who">Brain · varför</div><p>${h(c.thesis)}</p></div>` : "")}
 
         ${links.length ? `<div class="ext-links">${links.map((l) => `<a class="ext-link" href="${h(l.href)}" target="_blank" rel="noopener">${h(l.label)}</a>`).join("")}</div>` : ""}
+        <button type="button" class="btn btn-primary talk-bots-btn" data-talk-bots="${h("Vad tycker ni om " + (c.symbol || stats.symbol || "den här coinen") + "?")}">Prata med bottarna</button>
       </div></div>`;
     },
 

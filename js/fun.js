@@ -36,6 +36,50 @@
     }
   }
 
+  const SOURCE_ORDER = [
+    "Fear & Greed", "BTC-pris", "ETH-pris", "SOL-pris", "Funding (OKX)",
+    "S&P 500", "Nasdaq", "VIX", "Guldpris", "Olja",
+    "pump.fun-lanseringar", "Memecoin-index", "Snack på X"
+  ];
+
+  function friendlySources(rawList) {
+    const names = [];
+    const add = (n) => { if (n && names.indexOf(n) < 0) names.push(n); };
+    (rawList || []).forEach((raw) => {
+      String(raw || "").split(/[·,]/).map((s) => s.trim()).filter(Boolean).forEach((tok) => {
+        const t = tok.toLowerCase();
+        if (/alternative\.me|cnn:fearandgreed|fearandgreed/.test(t)) add("Fear & Greed");
+        else if (/btc-usd|\bbtc\b|bitcoin/.test(t)) add("BTC-pris");
+        else if (/eth-usd|\beth\b|ethereum/.test(t)) add("ETH-pris");
+        else if (/sol-usd|\bsol\b|solana/.test(t) && !/solana-meme/.test(t)) add("SOL-pris");
+        else if (/okx:funding|funding/.test(t)) add("Funding (OKX)");
+        else if (/\^gspc|\bgspc\b|s&p/.test(t)) add("S&P 500");
+        else if (/\^ixic|\bixic\b|nasdaq/.test(t)) add("Nasdaq");
+        else if (/\^vix|\bvix\b/.test(t)) add("VIX");
+        else if (/gc=f|xau|guldpris/.test(t) || (/(^|:)gold\b/.test(t) && !/fear/.test(t))) add("Guldpris");
+        else if (/cl=f|\bolja\b|\boil\b|\bwti\b/.test(t)) add("Olja");
+        else if (/pump\.fun/.test(t)) add("pump.fun-lanseringar");
+        else if (/meme-token|solana-meme|meme-index|coingecko:meme/.test(t)) add("Memecoin-index");
+        else if (/social:x|\bx-kollen\b/.test(t) || /(^|:)x$/.test(t)) add("Snack på X");
+      });
+    });
+    return SOURCE_ORDER.filter((n) => names.indexOf(n) >= 0).concat(names.filter((n) => SOURCE_ORDER.indexOf(n) < 0));
+  }
+
+  function moodSourcesHtml(m) {
+    const names = friendlySources(Array.isArray(m && m.sources) ? m.sources : []);
+    const tm = moodTimeSthlm(m && m.ts);
+    if (!names.length && !tm) return "";
+    const items = names.map((n) => `<li>${h(n)}</li>`).join("");
+    return `<details class="mood-sources">
+      <summary class="mood-src-chip"><span class="mood-src-ico" aria-hidden="true">i</span> Källor</summary>
+      <div class="mood-src-panel">
+        ${items ? `<ul class="mood-src-list">${items}</ul>` : ""}
+        ${tm ? `<div class="mood-src-updated">Uppdaterad ${h(tm)}</div>` : ""}
+      </div>
+    </details>`;
+  }
+
   function moodLanes(moodsObj, selectedLane) {
     const lane = MOOD_LANES.some((x) => x[0] === selectedLane) ? selectedLane : "memecoin";
     const chips = MOOD_LANES.map(([id, lab]) =>
@@ -49,9 +93,6 @@
       const score = Math.max(0, Math.min(100, Math.round(Number(m.score) || 0)));
       const tone = score <= 34 ? "down" : score >= 66 ? "up" : "warn";
       const label = m.label || (score <= 34 ? "Rädsla" : score >= 66 ? "Girighet" : "Neutral");
-      const srcs = Array.isArray(m.sources) ? m.sources.filter(Boolean) : [];
-      const tm = moodTimeSthlm(m.ts);
-      const cap = srcs.concat(tm ? [tm] : []).join(" · ");
       body = `
         <div class="mood-lane-head">
           <div class="mood-lane-score nums"><span class="chg ${tone}">${score}/100</span> <span class="mood-lane-label">${h(label)}</span></div>
@@ -59,7 +100,7 @@
         </div>
         <div class="mood-lane-track"><span class="mood-lane-fill ${tone}" style="width:${Math.max(3, score)}%"></span></div>
         ${m.why ? `<div class="mood-lane-why">${h(m.why)}</div>` : ""}
-        ${cap ? `<div class="mood-lane-cap">${h(cap)}</div>` : ""}`;
+        ${moodSourcesHtml(m)}`;
     }
     return `<div class="card fun-card" id="mood-lanes-card">
       <div class="card-h">Marknadens stämning per del</div>
@@ -220,6 +261,6 @@
     if (fresh.length && global.DeskToast) global.DeskToast(`🏅 Nytt märke: ${fresh[0].emoji} ${fresh[0].name}`);
   }
 
-  global.DeskFun = { moodLanes, laneGauge, laneHistory, ticker, chatPage, mood, streakChip, week, meme, chat, leaderboard, badges, soundToggle, checkWins, checkBadges, celebrate,
+  global.DeskFun = { moodLanes, moodSourcesHtml, friendlySources, laneGauge, laneHistory, ticker, chatPage, mood, streakChip, week, meme, chat, leaderboard, badges, soundToggle, checkWins, checkBadges, celebrate,
                      toggleSound() { LS.set("mmg_sound", LS.get("mmg_sound", "on") === "on" ? "off" : "on"); } };
 })(window);

@@ -965,7 +965,18 @@ a.chat-card:active { opacity: 0.88; }
 }
 .live-chat .when { margin-left: auto; font-size: 11px; font-weight: 500; color: var(--secondary); }
 .live-chat .bubble-text { white-space: pre-wrap; word-break: break-word; }
+
 .bot-filters { padding-top: 0; }
+.talk-bots-btn { margin: 4px 0 12px; }
+.live-chat .msg.k-owner_chat .bubble { background: rgba(42,171,238,.12); }
+.live-chat .msg.from-owner { flex-direction: row-reverse; }
+.live-chat .msg.from-owner .bubble {
+  background: rgba(10,132,255,.22);
+  border-radius: 14px 14px 4px 14px;
+}
+.live-chat .msg.from-owner .who { justify-content: flex-end; }
+.live-chat .msg.from-owner .when { margin-left: 0; margin-right: auto; padding-right: 8px; }
+
 
 
 /* ----- dark exchange-style multi-page additions (v15) ----- */
@@ -1086,7 +1097,68 @@ a.chat-card:active { opacity: 0.88; }
 .mood-lane-fill.warn { background: var(--gold); }
 .mood-lane-fill.down { background: var(--red); }
 .mood-lane-why { font-size: 13px; color: var(--label); line-height: 1.4; }
-.mood-lane-cap { font-size: 11px; color: var(--secondary); margin-top: 6px; }
+.mood-lane-cap { display: none; } /* raw source caption retired in v15.4 */
+.mood-sources { margin-top: 10px; }
+.mood-src-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  padding: 5px 10px 5px 8px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.04);
+  border: 0.5px solid var(--sep, rgba(255,255,255,.1));
+  color: var(--secondary);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  line-height: 1;
+}
+.mood-src-chip::-webkit-details-marker,
+.mood-src-chip::marker { display: none; content: ""; }
+.mood-sources[open] .mood-src-chip {
+  color: var(--label);
+  background: rgba(255,255,255,.08);
+  border-color: rgba(255,255,255,.16);
+}
+.mood-src-ico {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  font-size: 10px;
+  font-weight: 700;
+  font-style: italic;
+  font-family: Georgia, "Times New Roman", serif;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.85;
+}
+.mood-src-panel {
+  margin-top: 8px;
+  padding: 10px 12px 8px;
+  border-radius: 12px;
+  background: #1A1A1C;
+  border: 0.5px solid var(--sep, rgba(255,255,255,.1));
+}
+.mood-src-list { list-style: none; margin: 0; padding: 0; }
+.mood-src-list li {
+  font-size: 13px;
+  font-weight: 550;
+  color: var(--label);
+  padding: 7px 0;
+  border-bottom: 0.5px solid rgba(255,255,255,.06);
+}
+.mood-src-list li:last-child { border-bottom: 0; }
+.mood-src-updated {
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--secondary);
+}
 .chg.warn { color: var(--gold); }
 
 /* markets table */
