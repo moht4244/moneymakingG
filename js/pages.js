@@ -90,6 +90,18 @@
     return cut.length >= 2 ? cut : pts.slice(-Math.max(2, Math.min(pts.length, 8)));
   }
 
+  async function fromCoinGecko(symbol, tf) {
+    const id = CG_ID[symbol];
+    if (!id) return null;
+    const days = tf.id === "1H" || tf.id === "1D" ? "1" : tf.id === "1V" ? "7" : "30";
+    const url = "https://api.coingecko.com/api/v3/coins/" + encodeURIComponent(id) +
+      "/market_chart?vs_currency=usd&days=" + days;
+    const data = await getJSON(url);
+    const prices = data && data.prices;
+    if (!Array.isArray(prices) || prices.length < 2) return null;
+    return prices.map((r) => ({ t: +r[0], p: +r[1] })).filter((p) => isFinite(p.p) && p.t);
+  }
+
   async function fromBinance(symbol, tf) {
     const pair = BN_SPOT[symbol];
     if (!pair) return null;
@@ -142,9 +154,11 @@
     const api = global.DeskAPI;
     const snap = api && api._snap ? api._snap() : null;
     const series = (snap && snap.series) || {};
+    const pack = (snap && snap.ohlcv) || {};
     const mint = asset && (asset.mint || asset.id);
     const sym = tickOf(asset);
-    let pts = (mint && series[mint]) || (sym && series[sym]) || null;
+    let pts = (sym && pack[sym] && pack[sym][tf.id]) || (mint && pack[mint] && pack[mint][tf.id]) || null;
+    if (!pts) pts = (mint && series[mint]) || (sym && series[sym]) || null;
     if ((!pts || pts.length < 2) && asset && asset.chart && asset.chart.length >= 2) pts = asset.chart;
     if (!pts || pts.length < 2) return null;
     return sliceTf(pts.map((p) => ({ t: +p.t, p: +p.p })).filter((p) => isFinite(p.p) && p.t), tf);
@@ -160,6 +174,7 @@
     const hit = cache.get(key);
     if (hit && Date.now() - hit.at < 60000) return hit.data;
     const tries = [];
+    if (sym && CG_ID[sym]) tries.push(() => fromCoinGecko(sym, tf));
     if (sym && BN_SPOT[sym]) tries.push(() => fromBinance(sym, tf));
     if (mint) tries.push(() => fromGeckoTerminal(mint, tf));
     if (sym && (YA_SYM[sym] || (asset && (asset.lane === "stocks" || asset.category === "equity" || asset.venue === "hyperliquid")))) {
