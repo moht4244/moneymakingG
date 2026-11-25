@@ -1,5 +1,5 @@
 /* Moneymaking G service worker — cache static shell, always network for /api/ */
-const CACHE = "moneymaking-g-v2";
+const CACHE = "moneymaking-g-v5";
 const PRECACHE = [
   "./",
   "./index.html",
@@ -9,7 +9,6 @@ const PRECACHE = [
   "./js/app.js",
   "./sounds/kaching.wav",
   "./js/charts.js",
-  "./js/mock.js",
   "./manifest.json",
   "./apple-touch-icon.png",
   "./icon-192.png",

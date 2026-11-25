@@ -3,7 +3,7 @@
   "short_name": "MMG",
   "description": "Moneymaking G – dina trading-botar: värde, positioner, botar och händelser.",
   "lang": "sv",
-  "start_url": "./?mock=1",
+  "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",

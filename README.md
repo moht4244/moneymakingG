@@ -1,7 +1,7 @@
-# Moneymaking G — förhandsvisning (låtsasdata)
+# Moneymaking G
 
-Statisk förhandsvisning av appen med påhittad exempeldata. Inga riktiga plånböcker, inga nycklar, ingen koppling till trading-botarna.
+Webbapp för Moneymaking G. Låst — öppna länken med din app-token (`#t=`).
 
-Öppna: `https://moht4244.github.io/moneymaking-g-preview/?mock=1`
+App: https://moht4244.github.io/moneymakingG/
 
-Det här är **inte** live och handlar inte med riktiga pengar.
+Körs i PAPER tills du skriver LIVE. Inga nycklar eller tokens ligger i det här repot.

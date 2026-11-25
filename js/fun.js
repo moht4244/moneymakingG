@@ -46,11 +46,45 @@
     return `<div class="card fun-card meme"><div class="card-h">Dagens coin-meme</div><div class="meme-text">${h(m.text)}</div></div>`;
   }
 
+  function chatTime(ts) {
+    if (!ts) return "";
+    const d = new Date(ts);
+    const now = new Date();
+    const same = d.toLocaleDateString("sv-SE", { timeZone: "Europe/Stockholm" }) === now.toLocaleDateString("sv-SE", { timeZone: "Europe/Stockholm" });
+    const hm = d.toLocaleTimeString("sv-SE", { timeZone: "Europe/Stockholm", hour: "2-digit", minute: "2-digit" });
+    if (same) return hm;
+    return d.toLocaleDateString("sv-SE", { timeZone: "Europe/Stockholm", day: "numeric", month: "short" }) + " " + hm;
+  }
+
   function chat(list, max) {
     const items = (list || []).slice(-(max || 12));
-    if (!items.length) return `<div class="card fun-card"><div class="card-h">Bot-chatten</div><div class="muted small">Botarna är tysta än – här pratar de när något händer.</div></div>`;
-    return `<div class="card fun-card"><div class="card-h">Bot-chatten</div><div class="chat">${items.map((c) =>
-      `<div class="msg"><span class="av" title="${h(c.label)}">${h(c.emoji)}</span><div class="bubble"><div class="who">${h(c.label)}</div>${h(c.text)}</div></div>`).join("")}</div></div>`;
+    if (!items.length) return `<a class="card fun-card chat-card" href="#/chat" data-nav="#/chat"><div class="card-h">Botarnas chatt</div><div class="muted small">Botarna är tysta än – här pratar de när något händer. Tryck för att öppna.</div></a>`;
+    return `<a class="card fun-card chat-card" href="#/chat" data-nav="#/chat">
+      <div class="card-h">Botarnas chatt <span class="muted small" style="font-weight:500">Visa alla ›</span></div>
+      <div class="chat chat-teaser">${items.map((c) =>
+        `<div class="msg"><span class="av">${h(c.emoji)}</span><div class="bubble"><div class="who">${h(c.label)}</div>${h(c.text)}</div></div>`).join("")}</div></a>`;
+  }
+
+  function chatPage(list, filter, back) {
+    const all = list || [];
+    const bots = [];
+    const seen = new Set();
+    all.forEach((c) => { if (c.bot && !seen.has(c.bot)) { seen.add(c.bot); bots.push({ bot: c.bot, label: c.label || c.bot, emoji: c.emoji || "🤖" }); } });
+    const items = filter ? all.filter((c) => c.bot === filter) : all;
+    const chips = [`<a class="chip ${filter ? "" : "on"}" href="#/chat" data-nav="#/chat">Alla</a>`]
+      .concat(bots.map((b) => `<a class="chip ${filter === b.bot ? "on" : ""}" href="#/chat/${encodeURIComponent(b.bot)}" data-nav="#/chat/${encodeURIComponent(b.bot)}">${h(b.emoji)} ${h(b.label)}</a>`))
+      .join("");
+    const title = filter ? ((bots.find((b) => b.bot === filter) || {}).label || "Chatt") : "Botarnas chatt";
+    const msgs = items.length ? items.map((c) =>
+      `<div class="msg" id="chat-m-${h(c.id)}">
+        <a class="av" href="#/chat/${encodeURIComponent(c.bot)}" data-nav="#/chat/${encodeURIComponent(c.bot)}" title="${h(c.label)}">${h(c.emoji)}</a>
+        <div class="bubble">
+          <div class="who"><a href="#/chat/${encodeURIComponent(c.bot)}" data-nav="#/chat/${encodeURIComponent(c.bot)}">${h(c.label)}</a> <span class="when">${h(chatTime(c.ts))}</span></div>
+          ${h(c.text)}
+        </div>
+      </div>`).join("") : `<div class="muted" style="padding:24px 8px;text-align:center">Inga meddelanden från den här boten än.</div>`;
+    const more = filter ? `<a class="muted small" style="display:block;text-align:center;padding:8px 0 16px" href="#/bots/${encodeURIComponent(filter)}" data-nav="#/bots/${encodeURIComponent(filter)}">Se ${h(title)}s beslut ›</a>` : "";
+    return { title, back: back || "#/home", html: `<div class="chat-filters" role="tablist">${chips}</div><div class="chat-feed" id="chat-feed">${msgs}${more}</div>` };
   }
 
   function leaderboard(list, period) {
@@ -131,6 +165,6 @@
     if (fresh.length && global.DeskToast) global.DeskToast(`🏅 Nytt märke: ${fresh[0].emoji} ${fresh[0].name}`);
   }
 
-  global.DeskFun = { laneGauge, laneHistory, ticker, mood, streakChip, week, meme, chat, leaderboard, badges, soundToggle, checkWins, checkBadges, celebrate,
+  global.DeskFun = { laneGauge, laneHistory, ticker, chatPage, mood, streakChip, week, meme, chat, leaderboard, badges, soundToggle, checkWins, checkBadges, celebrate,
                      toggleSound() { LS.set("mmg_sound", LS.get("mmg_sound", "on") === "on" ? "off" : "on"); } };
 })(window);

@@ -29,7 +29,7 @@
     { title: "Skydd & portfölj", names: ["rug_guard", "portfolio", "reviewer", "shadow", "telegram"] }
   ];
   const MAJORS = new Set(["SOL", "JUP", "JTO", "BONK", "WIF", "PYTH", "RAY"]);
-  const LANE_LABELS = { memecoins: "Memecoins", majors: "Större coins" };
+  const LANE_LABELS = { memecoins: "Memecoins", majors: "Större coins", gold: "Guld", commodities: "Råvaror", stocks: "Aktier", assets: "Tillgångar" };
   const APP_NAME = "Moneymaking G";
 
   const $app = document.getElementById("app");
@@ -39,6 +39,8 @@
     error: null,
     desk: null,
     chartRange: "today",
+    moversSide: "best",
+    movers: null,
     chart: null,
     activity: null,
     activityFilter: "all",
@@ -63,6 +65,7 @@
     if (a === "bots") return { name: "bots" };
     if (a === "coin" && parts[1]) return { name: "coin", mint: decodeURIComponent(parts[1]) };
     if (a === "audit" && parts[1]) return { name: "audit", mint: decodeURIComponent(parts[1]) };
+    if (a === "chat") return { name: "chat", bot: parts[1] ? decodeURIComponent(parts[1]) : null };
     return { name: "home" };
   }
 
@@ -70,7 +73,7 @@
     const full = hash.startsWith("#") ? hash : "#" + hash;
     if (location.hash === full) {
       state.route = parseRoute();
-      render();
+      render({ keepScroll: false });
       loadRoute();
       return;
     }
@@ -123,6 +126,26 @@
     return "flat";
   }
 
+
+  const CHART_RANGES = [["today", "Idag"], ["7d", "7 d"], ["30d", "30 d"], ["month", "Månad"], ["year", "År"], ["start", "Sedan start"]];
+
+  function chartRangeButtons() {
+    const avail = (state.chart && state.chart.ranges) || CHART_RANGES.map((x) => x[0]);
+    const cur = avail.includes(state.chartRange) ? state.chartRange : (avail[0] || "today");
+    return CHART_RANGES.filter(([id]) => avail.includes(id)).map(([id, lab]) =>
+      `<button type="button" data-range="${id}" class="${cur === id ? "on" : ""}">${lab}</button>`
+    ).join("");
+  }
+
+  function chartSummary(c) {
+    if (!c || c.start_equity == null || c.end_equity == null) return "";
+    const chg = c.change_usd, pct = c.change_pct;
+    return `<div class="chart-summary">
+      <div class="muted small">Start ${h(fmtUsd(c.start_equity, { exact: true }))} → nu ${h(fmtUsd(c.end_equity, { exact: true }))}</div>
+      <div class="chg ${chgClass(chg)} nums">${chg >= 0 ? "+" : ""}${h(fmtUsd(chg, { exact: true }))} <span class="sub">(${h(fmtPct(pct))})</span></div>
+    </div>`;
+  }
+
   function relTime(ts) {
     if (!ts) return "";
     const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
@@ -159,7 +182,9 @@
 
   function laneOf(item) {
     if (!item) return null;
-    if (item.lane === "majors" || item.lane === "memecoins") return item.lane;
+    const raw = String(item.lane || "").toLowerCase();
+    if (raw === "memecoin" || raw === "memecoins") return "memecoins";
+    if (raw === "majors" || raw === "gold" || raw === "commodities" || raw === "stocks" || raw === "assets") return raw;
     if (item.symbol && MAJORS.has(String(item.symbol).toUpperCase())) return "majors";
     if (item.mint) return "memecoins";
     return null;
@@ -172,14 +197,14 @@
 
   function laneChip(lane) {
     if (!lane) return "";
-    const id = lane === "majors" ? "majors" : "memecoins";
-    return `<span class="lane lane-${id}">${h(LANE_LABELS[id])}</span>`;
+    const id = laneOf({ lane }) || (lane === "majors" ? "majors" : "memecoins");
+    return `<span class="lane lane-${id}">${h(LANE_LABELS[id] || id)}</span>`;
   }
 
   function laneFilterRow() {
-    const opts = [["all", "Alla"], ["memecoins", "Memecoins"], ["majors", "Större coins"]];
+    const opts = [["all", "Alla"], ["memecoins", "Memecoins"], ["majors", "Större coins"], ["gold", "Guld"]];
     return `<div class="filters lane-filters">
-      ${opts.map(([id, lab]) => `<button data-lane="${id}" class="${state.laneFilter === id ? "on" : ""}">${lab}</button>`).join("")}
+      ${opts.map(([id, lab]) => `<button type="button" data-lane="${id}" class="${state.laneFilter === id ? "on" : ""}">${lab}</button>`).join("")}
     </div>`;
   }
 
@@ -203,6 +228,7 @@
   }
 
   function tabbar(active) {
+    if (!active) return "";
     const tabs = [
       ["home", "Hem", "home"],
       ["bots", "Botar", "bots"],
@@ -215,9 +241,11 @@
       </a>`).join("")}</nav>`;
   }
 
-  function mockBanner() {
-    if (!DeskAPI.isMock()) return "";
-    return `<div class="mock-banner">MOCK · påhittad exempeldata – inte live</div>`;
+  function tokenForm() {
+    return `<form data-token-form class="token-form" autocomplete="off">
+      <input type="password" name="token" autocomplete="off" spellcheck="false" placeholder="App-token" aria-label="App-token">
+      <button type="submit" class="btn btn-primary">Öppna</button>
+    </form>`;
   }
 
   function topbar(opts) {
@@ -336,6 +364,82 @@
   }
   setInterval(tickGreeting, 1000);
 
+
+  const MOVERS_RANGE_SV = { today: "idag", "7d": "på 7 dagar", "30d": "på 30 dagar", month: "denna månad", year: "i år", start: "sedan start" };
+
+  function moversCard() {
+    const side = state.moversSide === "worst" ? "worst" : "best";
+    const raw = ((state.movers && state.movers.items) || []).filter((x) => x && x.change_pct != null);
+    const items = (side === "worst" ? raw.slice().sort((a, b) => a.change_pct - b.change_pct) : raw.slice().sort((a, b) => b.change_pct - a.change_pct)).slice(0, 4);
+    const rng = (state.movers && state.movers.range) || state.chartRange || "today";
+    const lab = MOVERS_RANGE_SV[rng] || "perioden";
+    const rows = items.length ? items.map((c) => `
+      <a class="row has-avatar" href="#/coin/${encodeURIComponent(c.mint)}" data-nav="#/coin/${encodeURIComponent(c.mint)}">
+        <div class="row-body">
+          <div class="row-title">${h(c.symbol)}${c.held ? " 💼" : ""}</div>
+          <div class="row-sub nums">${h(fmtUsd(c.price, { exact: true }))} · ${h(lab)}</div>
+        </div>
+        <div class="row-meta">
+          <div class="chg ${chgClass(c.change_pct)} nums">${h(fmtPct(c.change_pct))}</div>
+        </div>
+        ${svg("chev")}
+      </a>`).join("") : `<div class="state" style="padding:20px 16px"><p>Inga coins att jämföra för den här perioden än.</p></div>`;
+    return `<div class="card" id="movers-card">
+      <div class="card-h">Topp 4 coins
+        <div class="segments" data-role="movers-side">
+          <button type="button" data-movers="best" class="${side === "best" ? "on" : ""}">Bästa</button>
+          <button type="button" data-movers="worst" class="${side === "worst" ? "on" : ""}">Sämsta</button>
+        </div>
+      </div>
+      ${rows}
+    </div>`;
+  }
+
+
+  function riskMeter(risk) {
+    if (!risk || (!risk.daily && !risk.drawdown && !risk.weekly)) return "";
+    const daily = risk.daily || {};
+    const weekly = risk.weekly || {};
+    const dd = risk.drawdown || {};
+    const fill = (pct, lim) => {
+      const p = Math.abs(Number(pct) || 0);
+      const l = Math.max(0.01, Math.abs(Number(lim) || 1));
+      return Math.max(0, Math.min(100, (p / l) * 100));
+    };
+    const tone = (pct, lim, stopped) => {
+      if (stopped) return "bad";
+      const p = Number(pct) || 0;
+      const l = Math.abs(Number(lim) || 1);
+      if (p <= -l * 0.8) return "bad";
+      if (p <= -l * 0.4) return "warn";
+      return "ok";
+    };
+    const note = risk.entries_blocked
+      ? (daily.stopped ? "Nya köp är stoppade resten av dagen."
+        : dd.paused ? "Nya köp är pausade efter ett större tapp från toppen."
+        : "Nya köp är pausade just nu.")
+      : weekly.half_size ? "Botarna handlar med halv storlek den här veckan."
+      : "Allt rullar inom taken.";
+    return `<div class="card" id="risk-meter">
+      <div class="card-h">Risk</div>
+      <div class="risk-rows">
+        <div class="risk-row">
+          <div class="risk-lab">Idag <span class="nums">${h(fmtPct(daily.pnl_pct))} av ${h(fmtPct(-(daily.limit_pct || 5)))}</span></div>
+          <div class="risk-track"><span class="${tone(daily.pnl_pct, daily.limit_pct, daily.stopped)}" style="width:${fill(daily.pnl_pct, daily.limit_pct)}%"></span></div>
+        </div>
+        <div class="risk-row">
+          <div class="risk-lab">Veckan <span class="nums">${h(fmtPct(weekly.pnl_pct))} · halv storlek vid ${h(fmtPct(-(weekly.limit_pct || 10)))}</span></div>
+          <div class="risk-track"><span class="${tone(weekly.pnl_pct, weekly.limit_pct, weekly.half_size)}" style="width:${fill(weekly.pnl_pct, weekly.limit_pct)}%"></span></div>
+        </div>
+        <div class="risk-row">
+          <div class="risk-lab">Från toppen <span class="nums">${h(fmtPct(dd.pct))} · paus vid ${h(fmtPct(-(dd.limit_pct || 20)))}</span></div>
+          <div class="risk-track"><span class="${tone(-Math.abs(dd.pct || 0), dd.limit_pct, dd.paused)}" style="width:${fill(dd.pct, dd.limit_pct)}%"></span></div>
+        </div>
+      </div>
+      <p class="risk-note">${h(note)}</p>
+    </div>`;
+  }
+
   function renderHome() {
     const d = state.desk;
     if (state.loading && !d) return skeleton();
@@ -374,12 +478,12 @@
       </section>
       ${window.DeskFun && state.fun ? DeskFun.mood(state.fun.mood) : ""}
       ${window.DeskFun ? DeskFun.laneGauge(state.lanes) : ""}
-      <div class="segments" data-role="chart-range">
-        ${[["today", "Idag"], ["7d", "7 d"], ["30d", "30 d"]].map(([id, lab]) =>
-          `<button data-range="${id}" class="${state.chartRange === id ? "on" : ""}">${lab}</button>`
-        ).join("")}
+      <div class="segments segments-scroll" data-role="chart-range">
+        ${chartRangeButtons()}
       </div>
+      ${chartSummary(state.chart)}
       <div class="chart-wrap"><canvas id="equity-chart"></canvas></div>
+      ${moversCard()}
 
       <div class="card market-card">
         <div class="regime">
@@ -420,12 +524,14 @@
 
       ${lanes ? `<div class="card">
         <div class="card-h">Spår</div>
-        <div class="lane-bar"><span class="mem" style="width:${Number(lanes.memecoins && lanes.memecoins.pct) || 0}%"></span><span class="maj" style="width:${Number(lanes.majors && lanes.majors.pct) || 0}%"></span></div>
+        <div class="lane-bar"><span class="mem" style="width:${Number(lanes.memecoins && lanes.memecoins.pct) || 0}%"></span><span class="maj" style="width:${Number(lanes.majors && lanes.majors.pct) || 0}%"></span><span class="gold" style="width:${Number(lanes.gold && lanes.gold.pct) || 0}%"></span></div>
         <div class="lane-legend">
           <span><b>${h((lanes.memecoins && lanes.memecoins.pct) || 0)}%</b> Memecoins</span>
           <span><b>${h((lanes.majors && lanes.majors.pct) || 0)}%</b> Större coins</span>
+          <span><b>${h((lanes.gold && lanes.gold.pct) || 0)}%</b> Guld</span>
         </div>
       </div>` : ""}
+      ${riskMeter(d && d.risk)}
 
       ${laneFilterRow()}
 
@@ -550,7 +656,7 @@
         <div class="grade grade-${h(a.grade)}">${h(a.grade)}</div>
         <div>
           <div class="sym">${h(a.symbol)}</div>
-          <div class="name">${h(passed)} av ${h(total)} kontroller godkända${DeskAPI.isMock() ? " · exempelbetyg" : ""}</div>
+          <div class="name">${h(passed)} av ${h(total)} kontroller godkända</div>
         </div>
       </div>
       ${a.notes ? `<p class="muted" style="font-size:14px;margin:4px 0 12px;line-height:1.4">${h(a.notes)}</p>` : ""}
@@ -571,6 +677,16 @@
     </div></div>`;
   }
 
+
+  function renderChat() {
+    const back = (state.route && state.route.bot) ? "#/bots" : "#/home";
+    const page = window.DeskFun && DeskFun.chatPage
+      ? DeskFun.chatPage((state.fun && state.fun.chat) || [], state.route && state.route.bot, back)
+      : { title: "Botarnas chatt", back: back, html: "<div class=\"muted\" style=\"padding:24px\">Chatten kunde inte laddas.</div>" };
+    return `${topbar({ title: page.title, back: page.back, backLabel: "Tillbaka" })}
+    <div class="chat-screen">${page.html}</div>`;
+  }
+
   function renderBots() {
     if (state.loading && !state.desk) return skeleton();
     if (state.error && !state.desk) return errorView(state.error);
@@ -578,14 +694,14 @@
     const byName = Object.fromEntries(list.map((b) => [b.name, b]));
     return `${topbar({ title: "Botar", right: pillPaperOrLive(state.desk && state.desk.mode) })}
     <div class="screen"><div class="page">
-      <p class="muted" style="font-size:14px;margin:2px 0 8px">Alla botar jobbar ihop dygnet runt. Tryck på en bot för att se vad den har bestämt.</p>
+      <p class="muted" style="font-size:14px;margin:2px 0 8px">Alla botar jobbar ihop dygnet runt. Tryck på en bot för att öppna chatten.</p>
       ${BOT_GROUPS.map((g) => `
       <div class="card-h group-h">${h(g.title)}</div>
       <div class="card bots-list">
         ${g.names.map((name) => {
           const b = byName[name] || { name, label: name[0].toUpperCase() + name.slice(1).replace("_", " "), status: "idle", last: "" };
           const color = BOT_COLORS[name] || "var(--label)";
-          return `<a class="row" href="#/bots/${name}" data-nav="#/bots/${name}">
+          return `<a class="row" href="#/chat/${name}" data-nav="#/chat/${name}">
             <span class="bot-dot" style="background:${color}"></span>
             <div class="row-body">
               <div class="row-title">${h(b.label || name)}</div>
@@ -685,18 +801,19 @@
             <button class="copy-btn" data-action="copy-wallet" data-addr="${h(wallet.address)}">Kopiera adress</button>
           </div>
         </div>
-        ${wallet.sol != null ? `<div class="row"><div class="row-body"><div class="row-title">SOL${DeskAPI.isMock() ? " (example)" : ""}</div></div><div class="row-meta nums">${h(Number(wallet.sol).toFixed(2))} SOL</div></div>` : ""}
+        ${wallet.sol != null ? `<div class="row"><div class="row-body"><div class="row-title">SOL</div></div><div class="row-meta nums">${h(Number(wallet.sol).toFixed(2))} SOL</div></div>` : ""}
       </div>
 
       <div class="card">
         <div class="row"><div class="row-body"><div class="row-title">Läge</div></div><div class="row-meta">${pillPaperOrLive(mode)}</div></div>
         <div class="row"><div class="row-body"><div class="row-title">Schema</div></div><div class="row-meta">${h((d && d.schedule) || "24/7")}</div></div>
-        <div class="row"><div class="row-body"><div class="row-title">Anslutning</div></div><div class="row-meta tiny">${DeskAPI.isMock() ? "Förhandsvisning" : (token ? "Inloggad" : "Ingen app-token")}</div></div>
+        <div class="row"><div class="row-body"><div class="row-title">Anslutning</div></div><div class="row-meta tiny">${token ? "Inloggad" : "Ingen app-token"}</div></div>
+        ${token ? "" : `<div style="padding:8px 16px 16px">${tokenForm()}</div>`}
         <div class="row"><div class="row-body"><div class="row-title">Notiser</div><div class="row-sub">Notis vid köp, sälj och stopp</div></div>
           <button class="copy-btn" data-action="notify">Slå på</button>
         </div>
         ${window.DeskFun ? DeskFun.soundToggle() : ""}
-        <a class="row" href="#/account" hidden><div class="row-body"><div class="row-title">Regler</div><div class="row-sub">Godkänn regelförslag och återuppta köp</div></div>${svg("chev")}</a>
+        <a class="row" href="approve.html" data-keep><div class="row-body"><div class="row-title">Regler</div><div class="row-sub">Godkänn regelförslag och återuppta köp</div></div>${svg("chev")}</a>
       </div>
 
       ${window.DeskFun ? DeskFun.laneHistory(state.lanes) : ""}
@@ -709,8 +826,8 @@
     return `<div class="lock">
       <div class="mark" style="width:72px;height:72px;border-radius:20px;overflow:hidden;border:0.5px solid var(--sep)"><img src="apple-touch-icon.png" alt="" width="72" height="72"></div>
       <h2>Logga in i Moneymaking G</h2>
-      <p>Öppna länken som Moneymaking G skickade – den slutar med <span class="nums">#t=</span> – så sparas din app-token på telefonen. Eller titta på skärmarna med påhittad data.</p>
-      <a class="btn btn-primary" href="?mock=1#/home" style="margin-top:24px">Visa med exempeldata</a>
+      <p>Öppna länken som slutar med <span class="nums">#t=</span> – då sparas din app-token på telefonen. Du kan också klistra in token här.</p>
+      ${tokenForm()}
     </div>`;
   }
 
@@ -722,37 +839,96 @@
   }
 
   function tabFor(route) {
+    if (route.name === "chat") return ""; // full-screen chat, no tab bar
     if (route.name === "bots" || route.name === "bot") return "bots";
     if (route.name === "activity") return "activity";
     if (route.name === "account") return "account";
     return "home";
   }
 
-  function render() {
+  function scroller() {
+    return document.querySelector(".screen") || document.scrollingElement || document.documentElement;
+  }
+  function captureScroll() {
+    const s = scroller();
+    return { y: s ? s.scrollTop : 0, win: window.scrollY || 0 };
+  }
+  function restoreScroll(snap) {
+    if (!snap) return;
+    const apply = () => {
+      const s = scroller();
+      if (s) s.scrollTop = snap.y;
+      if (typeof snap.win === "number") window.scrollTo(0, snap.win);
+    };
+    apply();
+    requestAnimationFrame(apply);
+  }
+
+  function render(opts) {
+    const keep = !(opts && opts.keepScroll === false);
+    const snap = keep ? captureScroll() : null;
     const route = state.route;
-    const mock = DeskAPI.isMock();
-    const needsAuth = !mock && !DeskAPI.getToken() && route.name !== "account";
+    const needsAuth = !DeskAPI.getToken() && route.name !== "account";
     let body;
     if (needsAuth) body = renderLock();
     else if (route.name === "coin") body = renderCoin();
     else if (route.name === "audit") body = renderAudit();
+    else if (route.name === "chat") body = renderChat();
     else if (route.name === "bots") body = renderBots();
     else if (route.name === "bot") body = renderBot();
     else if (route.name === "activity") body = renderActivity();
     else if (route.name === "account") body = renderAccount();
     else body = renderHome();
 
-    $app.className = mock ? "has-mock" : "";
-    $app.innerHTML = `${mockBanner()}${body}${tabbar(tabFor(route))}${lightbox()}<div class="toast ${state.toast ? "show" : ""}" id="toast">${h(state.toast)}</div>`;
-
-    requestAnimationFrame(() => afterPaint());
+    if (document.activeElement && document.activeElement !== document.body && typeof document.activeElement.blur === "function") {
+      try { document.activeElement.blur(); } catch (_) {}
+    }
+    $app.className = "";
+    $app.innerHTML = `${body}${tabbar(tabFor(route))}${lightbox()}<div class="toast ${state.toast ? "show" : ""}" id="toast">${h(state.toast)}</div>`;
+    if (snap) restoreScroll(snap);
+    requestAnimationFrame(() => {
+      afterPaint();
+      if (snap) restoreScroll(snap);
+    });
   }
 
   function afterPaint() {
     const eq = document.getElementById("equity-chart");
     if (eq && state.chart && state.chart.points) DeskCharts.drawEquity(eq, state.chart.points);
+    const feed = document.getElementById("chat-feed");
+    if (feed) feed.scrollTop = feed.scrollHeight;
     const px = document.getElementById("price-chart");
     if (px && state.coin && state.coin.chart) DeskCharts.drawPrice(px, state.coin.chart);
+  }
+
+  function patchChartAndMovers() {
+    const sum = document.querySelector(".chart-summary");
+    if (sum) {
+      const html = chartSummary(state.chart);
+      if (html) sum.outerHTML = html;
+    }
+    document.querySelectorAll("[data-range]").forEach((b) => {
+      b.classList.toggle("on", b.getAttribute("data-range") === state.chartRange);
+    });
+    const eq = document.getElementById("equity-chart");
+    if (eq && state.chart && state.chart.points) DeskCharts.drawEquity(eq, state.chart.points);
+    const card = document.getElementById("movers-card");
+    if (card) card.outerHTML = moversCard();
+  }
+
+  async function updateChartRange(id) {
+    state.chartRange = id;
+    document.querySelectorAll("[data-range]").forEach((b) => b.classList.toggle("on", b.getAttribute("data-range") === id));
+    try {
+      const [c, mv] = await Promise.all([DeskAPI.getChart(id), DeskAPI.getMovers ? DeskAPI.getMovers(id).catch(() => null) : null]);
+      state.chart = c;
+      if (c && c.range && c.range !== state.chartRange) state.chartRange = c.range;
+      if (mv) state.movers = mv;
+      if (document.getElementById("equity-chart")) patchChartAndMovers();
+      else render({ keepScroll: true });
+    } catch (_) {
+      render({ keepScroll: true });
+    }
   }
 
   async function loadFun() {
@@ -765,7 +941,7 @@
     } catch (_) {}
   }
   window.DeskToast = (m) => toast(m);
-  setInterval(() => { if (!document.hidden) loadFun().then(() => { if (["home", "bots", "account"].includes(state.route.name)) render(); }); }, 60000);
+  setInterval(() => { if (!document.hidden) loadFun().then(() => { if (["home", "bots", "account", "chat"].includes(state.route.name)) render({ keepScroll: true }); }); }, 60000);
 
   async function loadRoute() {
     const r = state.route;
@@ -780,9 +956,12 @@
       if (r.name === "home") {
         state.loading = true;
         render();
-        state.chart = await DeskAPI.getChart(state.chartRange);
+        const [c, mv] = await Promise.all([DeskAPI.getChart(state.chartRange), DeskAPI.getMovers ? DeskAPI.getMovers(state.chartRange).catch(() => null) : null]);
+        state.chart = c;
+        if (c && c.range && c.range !== state.chartRange) state.chartRange = c.range;
+        if (mv) state.movers = mv;
         state.loading = false;
-        render();
+        render({ keepScroll: false });
         return;
       }
       if (r.name === "activity") {
@@ -843,7 +1022,24 @@
     }, 1600);
   }
 
+  $app.addEventListener("submit", (e) => {
+    const form = e.target.closest("[data-token-form]");
+    if (!form) return;
+    e.preventDefault();
+    const input = form.querySelector("[name=token]");
+    const val = input && input.value ? String(input.value).trim() : "";
+    if (!val) return;
+    DeskAPI.setToken(val);
+    if (input) input.value = "";
+    state.error = null;
+    state.loading = true;
+    render({ keepScroll: false });
+    loadRoute();
+  });
+
   $app.addEventListener("click", (e) => {
+    const rawHref = e.target.closest("a");
+    if (rawHref && (rawHref.getAttribute("href") === "#" || rawHref.getAttribute("href") === "")) e.preventDefault();
     const nav = e.target.closest("[data-nav]");
     if (nav) {
       e.preventDefault();
@@ -852,49 +1048,67 @@
     }
     const lb = e.target.closest("[data-lb]");
     if (lb) {
+      e.preventDefault();
+      if (lb.blur) lb.blur();
       state.lbPeriod = lb.getAttribute("data-lb");
-      loadFun().then(render);
+      loadFun().then(() => render({ keepScroll: true }));
       return;
     }
     const undo = e.target.closest("[data-lane-undo]");
     if (undo) {
+      e.preventDefault();
       if (!confirm("Ångra senaste ändringen av fördelningen?")) return;
-      DeskAPI.undoLane(undo.getAttribute("data-lane-undo")).then(() => { toast("↩️ Fördelningen är återställd"); return loadFun(); }).then(render).catch(() => toast("Kunde inte ångra just nu"));
+      DeskAPI.undoLane(undo.getAttribute("data-lane-undo")).then(() => { toast("↩️ Fördelningen är återställd"); return loadFun(); }).then(() => render({ keepScroll: true })).catch(() => toast("Kunde inte ångra just nu"));
       return;
     }
     if (e.target.closest("[data-sound-toggle]")) {
-      DeskFun.toggleSound(); render();
+      e.preventDefault();
+      DeskFun.toggleSound(); render({ keepScroll: true });
+      return;
+    }
+    const moversBtn = e.target.closest("[data-movers]");
+    if (moversBtn) {
+      e.preventDefault();
+      if (moversBtn.blur) moversBtn.blur();
+      state.moversSide = moversBtn.getAttribute("data-movers") === "worst" ? "worst" : "best";
+      const card = document.getElementById("movers-card");
+      if (card) card.outerHTML = moversCard();
+      else render({ keepScroll: true });
       return;
     }
     const range = e.target.closest("[data-range]");
     if (range) {
-      state.chartRange = range.getAttribute("data-range");
-      DeskAPI.getChart(state.chartRange).then((c) => { state.chart = c; render(); });
-      render();
+      e.preventDefault();
+      if (range.blur) range.blur();
+      updateChartRange(range.getAttribute("data-range"));
       return;
     }
     const filter = e.target.closest("[data-filter]");
     if (filter) {
+      e.preventDefault();
+      if (filter.blur) filter.blur();
       state.activityFilter = filter.getAttribute("data-filter");
       state.loading = true;
-      render();
+      render({ keepScroll: true });
       DeskAPI.getActivity({ kind: state.activityFilter }).then((a) => {
-        state.activity = a; state.loading = false; render();
-      }).catch((err) => { state.loading = false; state.error = err.message; render(); });
+        state.activity = a; state.loading = false; render({ keepScroll: true });
+      }).catch((err) => { state.loading = false; state.error = err.message; render({ keepScroll: true }); });
       return;
     }
     const laneBtn = e.target.closest("[data-lane]");
     if (laneBtn) {
+      e.preventDefault();
+      if (laneBtn.blur) laneBtn.blur();
       state.laneFilter = laneBtn.getAttribute("data-lane");
-      render();
+      render({ keepScroll: true });
       return;
     }
     const action = e.target.closest("[data-action]");
     if (!action) return;
     const act = action.getAttribute("data-action");
     if (act === "retry") { loadRoute(); }
-    if (act === "lightbox") { state.lightbox = true; render(); }
-    if (act === "close-lightbox") { state.lightbox = false; render(); }
+    if (act === "lightbox") { e.preventDefault(); state.lightbox = true; render({ keepScroll: true }); }
+    if (act === "close-lightbox") { e.preventDefault(); state.lightbox = false; render({ keepScroll: true }); }
     if (act === "copy-wallet") {
       const addr = action.getAttribute("data-addr") || "";
       if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -910,7 +1124,7 @@
   window.addEventListener("hashchange", () => {
     state.route = parseRoute();
     state.error = null;
-    render();
+    render({ keepScroll: false });
     loadRoute();
   });
 
@@ -928,7 +1142,7 @@
     state(s) { state.desk = Object.assign(state.desk || {}, s); render(); },
     activity() { /* stay put; user can refresh the feed */ },
     tick() {
-      if (state.route.name === "home" && document.getElementById("desk-screen") && !DeskAPI.isMock()) {
+      if (state.route.name === "home" && document.getElementById("desk-screen")) {
         document.getElementById("desk-screen").src = DeskAPI.screenUrl();
       }
     }
