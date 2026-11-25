@@ -157,6 +157,11 @@
     location.hash = full;
   }
 
+  function reasonText(s) {
+    try { if (window.DeskAPI && DeskAPI.plainReason) return DeskAPI.plainReason(s); } catch (e) {}
+    return s == null ? "" : String(s);
+  }
+
   function h(str) {
     return String(str == null ? "" : str)
       .replace(/&/g, "&amp;")
@@ -993,7 +998,7 @@
             ${tokenAvatar(w.symbol, w.mint)}
             <div class="row-body">
               <div class="row-title">${h(w.symbol)}${laneChip(laneOf(w))}</div>
-              <div class="row-sub">${h(w.reason || w.name || "")}</div>
+              <div class="row-sub">${h(reasonText(w.reason || w.name || ""))}</div>
             </div>
             <div class="row-meta"><div class="tiny">${w.score != null ? "Score " + h(w.score) : ""}</div></div>
             ${coinHrefOf(w) ? svg("chev") : ""}`, "row has-avatar")).join("")}
@@ -1329,7 +1334,7 @@
           <${tag} class="decision"${href}>
             <div class="when">${h(sthlmStamp(d.ts) || relTime(d.ts))}${d.symbol ? " · " + h(d.symbol) : ""}</div>
             <div class="act">${h(d.action || "")}</div>
-            <p>${h(d.reason || "")}</p>
+            <p>${h(reasonText(d.reason || ""))}</p>
           </${tag}>`; })()}
         `).join("") : emptyView("Inga beslut än", "När boten gör något syns det här.")}
       </div>

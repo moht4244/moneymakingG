@@ -730,6 +730,67 @@
     return res.json();
   }
 
+
+  function plainReason(s) {
+    if (s == null) return s;
+    let out = String(s);
+    if (!out) return out;
+    const exact = {
+      "price_glitch_voided": "Felaktigt pris – affären räknades inte",
+      "price_glitch": "Felaktigt pris",
+      "would_have_stopped": "Skulle ha stoppats",
+      "dead money": "Stillastående – ingen rörelse",
+      "pulled": "LP försvann",
+      "lp pulled": "LP försvann",
+      "dev dumping": "Skaparen sålde",
+      "emergency exit (rug guard)": "Nödsälj (rug guard)",
+      "emergency exit": "Nödsälj",
+      "hard blockers ok": "Klarade hard blockers",
+      "meme_test hard blockers ok": "Klarade hard blockers",
+      "no price": "Inget pris",
+      "ema cross down": "EMA-trend vände ner",
+      "rebalance": "Omfördelning",
+      "stop-loss": "Stop-loss",
+      "stop": "Stop-loss",
+      "tp": "Take-profit",
+      "owner_override": "Du tog över",
+      "beyond_stop": "Gick förbi stop-loss"
+    };
+    const key = out.trim();
+    if (exact[key] || exact[key.toLowerCase()]) return exact[key] || exact[key.toLowerCase()];
+    out = out.replace(/price_glitch_voided/ig, "Felaktigt pris – affären räknades inte");
+    out = out.replace(/^price_glitch:\s*/i, "Felaktigt pris: ");
+    out = out.replace(/\bprice_glitch\b/ig, "Felaktigt pris");
+    out = out.replace(/^would_have_stopped(?::\s*(.*))?$/i, function (_, rest) {
+      return "Skulle ha stoppats" + (rest ? " (" + rest.trim() + ")" : "");
+    });
+    out = out.replace(/\bwould_have_stopped\b/ig, "Skulle ha stoppats");
+    out = out.replace(/^stop\s*-?\s*(\d+(?:[.,]\d+)?)\s*%$/i, function (_, n) { return "Stop-loss −" + n.replace(".", ",") + " %"; });
+    out = out.replace(/^time stop\s+(\d+)\s*h$/i, "Tidsstopp efter $1 h");
+    out = out.replace(/^take profit\s+\+?(\d+(?:[.,]\d+)?)\s*%$/i, function (_, n) { return "Take-profit +" + n.replace(".", ",") + " %"; });
+    out = out.replace(/^take profit\s+(\d+(?:[.,]\d+)?)\s*x$/i, function (_, n) { return "Take-profit " + n.replace(".", ",") + "×"; });
+    out = out.replace(/^trail\s+(\d+(?:[.,]\d+)?)\s*%$/i, function (_, n) { return "Trailing stop " + n.replace(".", ",") + " %"; });
+    out = out.replace(/^owner resumed\s+(.+?)\s+buy$/i, function (_, sym) { return "Du återupptog köpet av " + sym.trim(); });
+    out = out.replace(/\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g, function (tok) {
+      const words = {
+        price_glitch_voided: "Felaktigt pris – affären räknades inte",
+        price_glitch: "Felaktigt pris",
+        would_have_stopped: "Skulle ha stoppats",
+        lane_daily: "spårets dagsgräns",
+        max_drawdown: "största nedgång",
+        eval_error: "kunde inte utvärderas",
+        owner_override: "du tog över",
+        beyond_stop: "gick förbi stop-loss",
+        whale_buy: "whale-köp",
+        meme_test: "meme-test",
+        take_profit: "take-profit",
+        stop_loss: "stop-loss"
+      };
+      return words[tok] || tok.replace(/_/g, " ");
+    });
+    return out;
+  }
+
   const api = {
     captureTokenFromUrl,
     getToken,
@@ -743,6 +804,7 @@
     snapGeneratedAt,
     loadSnap,
     refreshSnap: loadSnap,
+    plainReason,
 
     async getFun(period) {
       return liveGet("/api/fun?period=" + encodeURIComponent(period || "vecka"));

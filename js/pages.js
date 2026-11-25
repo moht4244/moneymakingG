@@ -313,6 +313,12 @@
   }
 
 
+  function reasonText(s) {
+    const api = global.DeskAPI;
+    if (api && api.plainReason) return api.plainReason(s);
+    return s == null ? "" : String(s);
+  }
+
   function safetyHtml(c, u) {
     const h = u.h;
     const s = (c && c.safety) || null;
@@ -371,7 +377,7 @@
       signalBlock = signals.map((sg) => {
         const label = kindSv[sg.kind] || sg.kind || "Signal";
         const meta = sg.score != null ? String(Math.round(sg.score)) : (sg.bias || "");
-        return `<div class="who">${h(label)}${sg.bot ? " · " + h(sg.bot) : ""}</div><p>${h(sg.summary || "—")}${meta ? ` <span class="muted nums">${h(String(meta))}</span>` : ""}</p>`;
+        return `<div class="who">${h(label)}${sg.bot ? " · " + h(sg.bot) : ""}</div><p>${h(reasonText(sg.summary || "—"))}${meta ? ` <span class="muted nums">${h(String(meta))}</span>` : ""}</p>`;
       }).join("");
     }
 
@@ -380,7 +386,7 @@
     if (isMeme) {
       if (reports.length) {
         reportBlock = `<div class="card thesis"><div class="card-h">Förköpsrapporter</div>` + reports.map((rp) => {
-          return `<div class="who">${h(reportSv[rp.kind] || rp.kind || "Rapport")}${rp.bot ? " · " + h(rp.bot) : ""}</div><p>${h(rp.summary || "—")}</p>`;
+          return `<div class="who">${h(reportSv[rp.kind] || rp.kind || "Rapport")}${rp.bot ? " · " + h(rp.bot) : ""}</div><p>${h(reasonText(rp.summary || "—"))}</p>`;
         }).join("") + `</div>`;
       } else {
         reportBlock = `<div class="card thesis"><div class="card-h">Förköpsrapporter</div><p>Inga förköpsrapporter för den här coinen än.</p></div>`;
@@ -400,7 +406,7 @@
       </div>
       <div class="card thesis safety-why">
         <div class="card-h">${h(whyTitle)}</div>
-        <p>${h(whyBody)}</p>
+        <p>${h(reasonText(whyBody))}</p>
         ${signalBlock}
       </div>
       ${reportBlock}
@@ -480,7 +486,7 @@
 
         ${reasons.length ? `<div class="card thesis">
           <div class="card-h">Botarnas motivering</div>
-          ${reasons.map((r) => `<div class="who">${h((r.bot || "bot") + (r.side ? " · " + r.side : ""))}</div><p>${h(r.text)}</p>`).join("")}
+          ${reasons.map((r) => `<div class="who">${h((r.bot || "bot") + (r.side ? " · " + r.side : ""))}</div><p>${h(reasonText(r.text))}</p>`).join("")}
         </div>` : (c.thesis ? `<div class="card thesis"><div class="who">Brain · varför</div><p>${h(c.thesis)}</p></div>` : "")}
 
         ${links.length ? `<div class="ext-links">${links.map((l) => `<a class="ext-link" href="${h(l.href)}" target="_blank" rel="noopener">${h(l.label)}</a>`).join("")}</div>` : ""}
@@ -589,7 +595,7 @@
             <div class="row-body">
               <div class="row-title">${h(t.symbol)}${laneChip(t.lane)}</div>
               <div class="row-sub">${h(when(t.closed_at))}${t.entry_bot || t.exit_bot ? " · " + h([t.entry_bot, t.exit_bot].filter(Boolean).join(" → ")) : ""}</div>
-              <div class="row-sub" style="white-space:normal;margin-top:4px">${t.entry_reason ? `<b>Köp:</b> ${h(t.entry_reason)} ` : ""}${t.exit_reason ? `<b>Sälj:</b> ${h(t.exit_reason)}` : ""}</div>
+              <div class="row-sub" style="white-space:normal;margin-top:4px">${t.entry_reason ? `<b>Köp:</b> ${h(reasonText(t.entry_reason))} ` : ""}${t.exit_reason ? `<b>Sälj:</b> ${h(reasonText(t.exit_reason))}` : ""}</div>
             </div>
             <div class="row-meta">
               <div class="asset-val nums ${chgClass(t.pnl_usd)}">${h(fmtUsd(t.pnl_usd, { exact: true }))}</div>
