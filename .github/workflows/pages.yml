@@ -16,10 +16,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -30,6 +27,18 @@ jobs:
         with:
           path: .
           include-hidden-files: true
+
+  deploy:
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      # upload-pages-artifact and deploy-pages in one job can miss the
+      # artifact; listing it from a later job avoids that race.
+      - name: Wait for the Pages artifact to be listable
+        run: sleep 20
 
       - name: Deploy to GitHub Pages
         id: deployment
