@@ -96,6 +96,9 @@
     if (n == null || !isFinite(n)) return "—";
     const neg = n < 0 ? "−" : "";
     const abs = Math.abs(n);
+    if (opts && opts.cents) {
+      return neg + "$" + abs.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
     if (abs >= 1000 && !(opts && opts.exact)) return neg + "$" + compact(abs);
     if (abs >= 100) {
       const d = Math.abs(abs - Math.round(abs)) < 0.005 ? 0 : 2;
@@ -204,7 +207,7 @@
 
   function pnlStack(pct, usd) {
     if (pct == null && usd == null) return "";
-    const dollar = usd == null ? "" : `<div class="pnl-usd tiny nums chg ${chgClass(usd)}">${usd >= 0 ? "+" : ""}${h(fmtUsd(usd, { exact: true }))}</div>`;
+    const dollar = usd == null ? "" : `<div class="pnl-usd tiny nums chg ${chgClass(usd)}">${usd >= 0 ? "+" : ""}${h(fmtUsd(usd, { cents: true }))}</div>`;
     const pill = pct == null ? "" : pnlPill(pct);
     return `<div class="pnl-stack">${pill}${dollar}</div>`;
   }
@@ -220,12 +223,12 @@
       <p class="hero-equity nums">${h(fmtUsd(d.equity_usd, { exact: true }))}</p>
       <div class="hero-pnl">
         ${pnlPill(totP)}
-        <span class="hero-pnl-usd chg ${chgClass(totU)} nums">${totU >= 0 ? "+" : ""}${h(fmtUsd(totU, { exact: true }))} sedan start</span>
+        <span class="hero-pnl-usd chg ${chgClass(totU)} nums">${totU >= 0 ? "+" : ""}${h(fmtUsd(totU, { cents: true }))} sedan start</span>
       </div>
       <div class="hero-today">
         <span class="k">Idag</span>
         ${pnlPill(dayP)}
-        <span class="chg ${chgClass(dayU)} nums">${dayU >= 0 ? "+" : ""}${h(fmtUsd(dayU, { exact: true }))}</span>
+        <span class="chg ${chgClass(dayU)} nums">${dayU >= 0 ? "+" : ""}${h(fmtUsd(dayU, { cents: true }))}</span>
       </div>
     </section>`;
   }
