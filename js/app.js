@@ -272,7 +272,7 @@
   }
 
   function buildLabel() {
-    const raw = String(window.MMG_BUILD || "").trim() || "v10-20261125";
+    const raw = String(window.MMG_BUILD || "").trim() || "v11-20261125";
     const m = raw.match(/^(v\d+)-(\d{4})(\d{2})(\d{2})$/);
     if (!m) return raw;
     const months = ["jan", "feb", "mars", "apr", "maj", "juni", "juli", "aug", "sep", "okt", "nov", "dec"];
@@ -1112,10 +1112,16 @@
   }
 
   const PTR_THRESHOLD = 70;
+  const PTR_CAP = 110;
+  const PTR_HOLD = 60;
+  const PTR_RESIST = 0.5;
   const $ptr = document.createElement("div");
   $ptr.className = "ptr";
   $ptr.setAttribute("aria-live", "polite");
-  const ptr = { startY: 0, startX: 0, pulling: false, armed: false, dy: 0, busy: false, hideTimer: 0 };
+  $ptr.innerHTML = '<div class="ptr-spin" aria-hidden="true"></div><div class="ptr-text"></div>';
+  const $ptrSpin = $ptr.querySelector(".ptr-spin");
+  const $ptrText = $ptr.querySelector(".ptr-text");
+  const ptr = { startY: 0, startX: 0, pulling: false, armed: false, dy: 0, offset: 0, busy: false, hideTimer: 0, moveBound: false };
 
   function ensurePtr() {
     if ($app && $ptr.parentNode !== $app) $app.appendChild($ptr);
@@ -1128,30 +1134,79 @@
     if (feed && feed.scrollTop > 0) return false;
     return true;
   }
-  function showPtr(text, opts) {
-    ensurePtr();
-    const o = opts || {};
-    $ptr.classList.add("show");
-    $ptr.classList.toggle("error", !!o.error);
-    $ptr.innerHTML = (o.spin ? '<div class="ptr-spin" aria-hidden="true"></div>' : "") +
-      (text ? '<div class="ptr-text">' + text + "</div>" : "");
+  function ptrSheetNodes() {
+    if (!$app) return [];
+    return Array.prototype.slice.call($app.querySelectorAll(":scope > .topbar, :scope > .screen"));
   }
-  function hidePtr() {
+  function ptrOffset(pull) {
+    return Math.min(PTR_CAP, Math.max(0, pull) * PTR_RESIST);
+  }
+  function ptrSetSheet(y, animate) {
+    const px = Math.max(0, y);
+    ptr.offset = px;
+    const trans = animate ? "transform 250ms ease-out" : "none";
+    ptrSheetNodes().forEach((n) => {
+      n.style.willChange = "transform";
+      n.style.transition = trans;
+      n.style.transform = "translate3d(0," + px + "px,0)";
+    });
+  }
+  function ptrClearSheet() {
+    ptrSheetNodes().forEach((n) => {
+      n.style.willChange = "";
+      n.style.transition = "";
+      n.style.transform = "";
+    });
+    ptr.offset = 0;
+  }
+  function ptrWaitSettle() {
+    return new Promise((resolve) => {
+      const n = ptrSheetNodes()[0];
+      let done = false;
+      const finish = () => { if (done) return; done = true; resolve(); };
+      if (n) n.addEventListener("transitionend", finish, { once: true });
+      setTimeout(finish, 320);
+    });
+  }
+  function ptrShowHint(text, mode) {
+    ensurePtr();
+    $ptr.classList.add("show");
+    $ptr.classList.toggle("error", mode === "error");
+    $ptr.classList.toggle("spinning", mode === "loading");
+    $ptrText.textContent = text || "";
+    if (mode === "loading") {
+      $ptrSpin.style.transform = "";
+    } else if (mode === "error") {
+      $ptrSpin.style.transform = "";
+    }
+  }
+  function ptrHideHint() {
     if (ptr.hideTimer) { clearTimeout(ptr.hideTimer); ptr.hideTimer = 0; }
-    $ptr.classList.remove("show", "error");
-    $ptr.style.transform = "";
-    $ptr.innerHTML = "";
+    $ptr.classList.remove("show", "error", "spinning");
+    $ptrSpin.style.transform = "";
+    $ptrText.textContent = "";
+  }
+  function ptrBindMove() {
+    if (ptr.moveBound) return;
+    document.addEventListener("touchmove", ptrOnMove, { passive: false });
+    ptr.moveBound = true;
+  }
+  function ptrUnbindMove() {
+    if (!ptr.moveBound) return;
+    document.removeEventListener("touchmove", ptrOnMove);
+    ptr.moveBound = false;
   }
   function ptrOnStart(e) {
     if (ptr.busy) return;
     if (!(DeskAPI.isUnlocked && DeskAPI.isUnlocked())) return;
     if (!e.touches || e.touches.length !== 1) return;
-    if (!atScrollTop()) { ptr.armed = false; return; }
+    if (!atScrollTop()) { ptr.armed = false; ptrUnbindMove(); return; }
     ptr.armed = true;
     ptr.pulling = false;
     ptr.startY = e.touches[0].clientY;
     ptr.startX = e.touches[0].clientX;
     ptr.dy = 0;
+    ptrBindMove();
   }
   function ptrOnMove(e) {
     if (!ptr.armed || ptr.busy) return;
@@ -1161,42 +1216,52 @@
     const dx = t.clientX - ptr.startX;
     if (!ptr.pulling) {
       if (dy < 8) return;
-      if (Math.abs(dx) > dy) { ptr.armed = false; return; }
-      if (!atScrollTop()) { ptr.armed = false; return; }
+      if (Math.abs(dx) > dy) { ptr.armed = false; ptrUnbindMove(); return; }
+      if (!atScrollTop()) { ptr.armed = false; ptrUnbindMove(); return; }
       ptr.pulling = true;
     }
     if (ptr.pulling && dy > 0) {
       e.preventDefault();
       ptr.dy = dy;
-      const offset = Math.min(96, dy * 0.45);
+      const offset = ptrOffset(dy);
+      ptrSetSheet(offset, false);
       ensurePtr();
       $ptr.classList.add("show");
-      $ptr.classList.remove("error");
-      $ptr.style.transform = "translateY(" + offset + "px)";
-      $ptr.innerHTML = '<div class="ptr-spin" aria-hidden="true"></div>' +
-        (dy >= PTR_THRESHOLD ? '<div class="ptr-text">Uppdaterar...</div>' : "");
+      $ptr.classList.remove("error", "spinning");
+      $ptrSpin.style.transform = "rotate(" + ((offset / PTR_CAP) * 360) + "deg)";
+      $ptrText.textContent = offset >= PTR_THRESHOLD ? "Släpp för att uppdatera" : "";
+    } else if (ptr.pulling && dy <= 0) {
+      ptr.dy = 0;
+      ptrSetSheet(0, false);
+      $ptrText.textContent = "";
     }
   }
   function ptrOnEnd() {
+    ptrUnbindMove();
     if (!ptr.pulling) {
       ptr.armed = false;
       ptr.dy = 0;
-      if (!ptr.busy) { $ptr.style.transform = ""; if (!$ptr.classList.contains("error")) hidePtr(); }
       return;
     }
-    const go = ptr.dy >= PTR_THRESHOLD;
+    const go = ptrOffset(ptr.dy) >= PTR_THRESHOLD;
     ptr.pulling = false;
     ptr.armed = false;
     ptr.dy = 0;
     if (go) pullRefresh();
-    else { $ptr.style.transform = ""; hidePtr(); }
+    else ptrSnapBack();
+  }
+  async function ptrSnapBack() {
+    ptrSetSheet(0, true);
+    await ptrWaitSettle();
+    ptrClearSheet();
+    ptrHideHint();
   }
   async function pullRefresh() {
     if (ptr.busy) return;
     if (!(DeskAPI.isUnlocked && DeskAPI.isUnlocked())) return;
     ptr.busy = true;
-    $ptr.style.transform = "";
-    showPtr("Uppdaterar...", { spin: true });
+    ptrSetSheet(PTR_HOLD, true);
+    ptrShowHint("Uppdaterar...", "loading");
     try {
       if (typeof DeskAPI.refreshSnap === "function") await DeskAPI.refreshSnap();
       else if (typeof DeskAPI.loadSnap === "function") await DeskAPI.loadSnap();
@@ -1210,17 +1275,21 @@
       if (act) state.activity = act;
       await loadFun();
       render({ keepScroll: true });
-      hidePtr();
+      ptrSetSheet(PTR_HOLD, false);
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      await ptrSnapBack();
     } catch (e) {
       const code = e && (e.code || e.name);
       if (code === "decrypt_failed" || code === "bad_passcode" || code === "OperationError") {
-        hidePtr();
+        ptrClearSheet();
+        ptrHideHint();
         state.lockError = "Något gick fel när appen skulle öppnas. Logga in igen och försök på nytt.";
         render({ keepScroll: false });
         return;
       }
-      showPtr("Kunde inte uppdatera", { spin: false, error: true });
-      ptr.hideTimer = setTimeout(() => { hidePtr(); }, 2200);
+      ptrShowHint("Kunde inte uppdatera", "error");
+      await new Promise((r) => { ptr.hideTimer = setTimeout(r, 1600); });
+      await ptrSnapBack();
     } finally {
       ptr.busy = false;
     }
@@ -1566,7 +1635,6 @@
   });
 
   document.addEventListener("touchstart", ptrOnStart, { passive: true });
-  document.addEventListener("touchmove", ptrOnMove, { passive: false });
   document.addEventListener("touchend", ptrOnEnd);
   document.addEventListener("touchcancel", ptrOnEnd);
 

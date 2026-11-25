@@ -90,6 +90,9 @@ img { display: block; max-width: 100%; }
   -webkit-overflow-scrolling: touch;
   overscroll-behavior-y: contain;
   padding-bottom: calc(var(--tabbar-h) + var(--safe-bot) + 24px);
+  background: var(--bg);
+  position: relative;
+  z-index: 3;
 }
 
 .topbar {
@@ -841,18 +844,19 @@ a.chat-card:active { opacity: 0.88; }
   position: absolute;
   left: 0;
   right: 0;
-  top: calc(var(--safe-top) + 6px);
+  top: var(--safe-top);
+  height: 60px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  z-index: 20;
+  justify-content: center;
+  gap: 4px;
+  z-index: 1;
   pointer-events: none;
   color: var(--secondary);
   font-size: 13px;
   font-weight: 600;
   opacity: 0;
-  transform: translateY(-8px);
   transition: opacity 0.15s ease;
 }
 .ptr.show { opacity: 1; }
@@ -863,6 +867,6 @@ a.chat-card:active { opacity: 0.88; }
   border: 2px solid var(--fill);
   border-top-color: var(--label);
   border-radius: 50%;
-  animation: ptr-spin 0.7s linear infinite;
 }
+.ptr.spinning .ptr-spin { animation: ptr-spin 0.7s linear infinite; }
 @keyframes ptr-spin { to { transform: rotate(360deg); } }
