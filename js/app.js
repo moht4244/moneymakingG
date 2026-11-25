@@ -904,10 +904,11 @@
     const weekLim = (risk.weekly && risk.weekly.limit_pct) || 10;
     const ddLim = (risk.drawdown && risk.drawdown.limit_pct) || 20;
     const tradePct = risk.effective_risk_per_trade_pct || risk.risk_per_trade_pct_cap || 3;
+    const hs = (state.lanes && state.lanes.health && state.lanes.health.split) || {};
     const split = {
-      memecoin: (lanes.memecoins && (lanes.memecoins.target_pct != null ? lanes.memecoins.target_pct : lanes.memecoins.pct)) ?? 50,
-      majors: (lanes.majors && (lanes.majors.target_pct != null ? lanes.majors.target_pct : lanes.majors.pct)) ?? 40,
-      reserve: (lanes.reserve && (lanes.reserve.target_pct != null ? lanes.reserve.target_pct : lanes.reserve.pct)) ?? 10
+      memecoin: hs.memecoin != null ? hs.memecoin : ((lanes.memecoins && lanes.memecoins.pct != null) ? lanes.memecoins.pct : 50),
+      majors: hs.majors != null ? hs.majors : ((lanes.majors && lanes.majors.pct != null) ? lanes.majors.pct : 40),
+      reserve: hs.reserve != null ? hs.reserve : 10
     };
     const mode = d.mode || "PAPER";
     const levLocked = lev.locked !== false && !lev.unlocked;
@@ -961,7 +962,7 @@
         <div class="rule-item"><div class="row-title">Högst 50 % i ett spår eller en coin</div><div class="row-sub">Ingen marknad får ta mer än hälften av kontot.</div></div>
         <div class="rule-item"><div class="row-title">Minst 10 % i reserv</div><div class="row-sub">En tiondel ska alltid ligga undan.</div></div>
         <div class="rule-item"><div class="row-title">Högst 15 procentenheter per flytt, en gång per dygn</div><div class="row-sub">Botarna får inte flytta mer än så, och inte oftare än en gång på 24 timmar.</div></div>
-        <div class="rule-item"><div class="row-title">Just nu</div><div class="row-sub">Mål: ${h(split.memecoin)} % memecoins · ${h(split.majors)} % större coins · ${h(split.reserve)} % reserv.</div></div>
+        <div class="rule-item"><div class="row-title">Fördelning nu</div><div class="row-sub">${h(split.memecoin)} % memecoins · ${h(split.majors)} % större coins · ${h(split.reserve)} % reserv.</div></div>
       </div>
 
       <div class="card">
