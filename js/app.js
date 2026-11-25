@@ -271,6 +271,22 @@
     </form>`;
   }
 
+  function freshnessBlock() {
+    const raw = (window.DeskAPI && DeskAPI.snapGeneratedAt && DeskAPI.snapGeneratedAt()) || "";
+    if (!raw) return "";
+    const d = parseTs(raw);
+    if (!d) return "";
+    let hhmm = "";
+    try {
+      hhmm = new Intl.DateTimeFormat("sv-SE", { timeZone: "Europe/Stockholm", hour: "2-digit", minute: "2-digit", hour12: false }).format(d);
+    } catch (_) {
+      hhmm = String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+    }
+    const ageMin = (Date.now() - d.getTime()) / 60000;
+    const banner = ageMin > 5 ? `<div class="stale-banner" role="status">Data är gammal</div>` : "";
+    return `${banner}<p class="freshness">Senast uppdaterad ${h(hhmm)}</p>`;
+  }
+
   function topbar(opts) {
     const o = opts || {};
     const left = o.back
@@ -868,7 +884,7 @@
 
   const KIND_SV = { buy:"KÖP", sell:"SÄLJ", stop:"STOPP", block:"STOPP", rejected:"SKIP", lesson:"LÄRD",
     scan:"SIGNAL", signal:"SIGNAL", risk:"RISK", research:"RES", whale:"WHALE", sentiment:"STÄMN",
-    guard:"VAKT", portfolio:"PORT", review:"REV", system:"INFO" };
+    guard:"VAKT", portfolio:"PORT", review:"REV", system:"INFO", news:"NYHET", whale:"WHALE" };
 
   function liveFeedCard() {
     const raw = ((state.live && state.live.items) || (state.activity && state.activity.items) || []).slice();
@@ -1033,7 +1049,7 @@
         </div>
         ${window.DeskFun ? DeskFun.soundToggle() : ""}
         <a class="row" href="#/regler" data-nav="#/regler"><div class="row-body"><div class="row-title">Regler</div><div class="row-sub">Så här skyddas kontot</div></div>${svg("chev")}</a>
-        <div class="row"><div class="row-body"><div class="row-title">Version</div><div class="row-sub">v8 · 25 nov 2026</div></div></div>
+        <div class="row"><div class="row-body"><div class="row-title">Version</div><div class="row-sub">v9 · 25 nov 2026</div></div></div>
       </div>
 
       ${window.DeskFun ? DeskFun.laneHistory(state.lanes) : ""}
@@ -1107,6 +1123,9 @@
       try { document.activeElement.blur(); } catch (_) {}
     }
     $app.className = "";
+    if (body && body.indexOf('<div class="page">') >= 0) {
+      body = body.replace('<div class="page">', '<div class="page">' + freshnessBlock());
+    }
     $app.innerHTML = `${body}${tabbar(tabFor(route))}${lightbox()}<div class="toast ${state.toast ? "show" : ""}" id="toast">${h(state.toast)}</div>`;
     if (snap) restoreScroll(snap);
     requestAnimationFrame(() => {

@@ -816,3 +816,22 @@ a.chat-card:active { opacity: 0.88; }
 }
 .rule-check.ok { color: var(--label); }
 .rule-check.ok .mark { color: #30D158; }
+
+
+.freshness {
+  margin: 4px 0 10px;
+  font-size: 12px;
+  color: var(--secondary, #8e8e93);
+  text-align: center;
+}
+.stale-banner {
+  background: #9b1c1c;
+  color: #fff;
+  font-weight: 700;
+  font-size: 14px;
+  text-align: center;
+  padding: 10px 14px;
+  border-radius: 12px;
+  margin: 0 0 10px;
+}
+.event-kind.news { background: #3a2a00; color: #ffd60a; }

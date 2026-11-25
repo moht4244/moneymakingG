@@ -144,8 +144,42 @@
     return !!(env && env.v && env.ct && env.iv && env.salt);
   }
 
+  const REF_API = "https://api.github.com/repos/moht4244/moneymakingG/git/refs/heads/data";
+
+  async function envFromGithubContents(url) {
+    const r = await fetchJsonCors(url + (url.indexOf("?") >= 0 ? "&" : "?") + "t=" + Date.now(), {
+      headers: { Accept: "application/vnd.github+json" }
+    });
+    if (!r || !r.ok) return null;
+    const j = await r.json();
+    const text = atob(String(j.content || "").replace(/\n/g, ""));
+    const env = JSON.parse(text);
+    return looksLikeSnap(env) ? env : null;
+  }
+
   async function fetchSnapEnv() {
     const bust = "t=" + Date.now();
+    // 1) GitHub Contents API — not cached for 12h like jsDelivr @data
+    try {
+      const env = await envFromGithubContents(SNAP_API);
+      if (env) return env;
+    } catch (_) {}
+    // 2) jsDelivr pinned to the current data-branch commit SHA
+    try {
+      const r = await fetchJsonCors(REF_API + "?" + bust, { headers: { Accept: "application/vnd.github+json" } });
+      if (r && r.ok) {
+        const ref = await r.json();
+        const sha = (ref && ref.object && ref.object.sha) || "";
+        if (sha) {
+          const r2 = await fetchJsonCors("https://cdn.jsdelivr.net/gh/moht4244/moneymakingG@" + sha + "/snap.enc?" + bust);
+          if (r2 && r2.ok) {
+            const env = await r2.json();
+            if (looksLikeSnap(env)) return env;
+          }
+        }
+      }
+    } catch (_) {}
+    // 3) CDN fallbacks (may be stale — the app flags generated_at > 5 min)
     for (let i = 0; i < SNAP_URLS.length; i++) {
       try {
         const base = SNAP_URLS[i];
@@ -155,15 +189,13 @@
         if (looksLikeSnap(env)) return env;
       } catch (_) {}
     }
-    const r = await fetchJsonCors(SNAP_API + "&" + bust, { headers: { Accept: "application/vnd.github+json" } });
-    if (!r.ok) {
-      const err = new Error("HTTP " + r.status);
-      err.status = r.status;
-      throw err;
-    }
-    const j = await r.json();
-    const text = atob(String(j.content || "").replace(/\n/g, ""));
-    return JSON.parse(text);
+    const err = new Error("HTTP 404");
+    err.status = 404;
+    throw err;
+  }
+
+  function snapGeneratedAt() {
+    return (snapCache && snapCache.generated_at) || null;
   }
 
   async function snapDeriveKey(secret, saltB64, iter) {
@@ -562,6 +594,7 @@
     tryRememberedUnlock,
     logout,
     onHostedPages,
+    snapGeneratedAt,
 
     async getFun(period) {
       return liveGet("/api/fun?period=" + encodeURIComponent(period || "vecka"));
