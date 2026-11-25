@@ -190,9 +190,77 @@
     return String(sym || "?").slice(0, 3).toUpperCase();
   }
 
-  function tokenAvatar(symbol, mint) {
+  function tokenAvatar(symbol, mint, iconUrl) {
     const hue = hashHue(mint || symbol || "");
-    return `<div class="token-fallback" style="background:hsl(${hue} 28% 22%)">${h(initials(symbol))}</div>`;
+    const fb = `<div class="token-fallback" style="background:hsl(${hue} 32% 20%)">${h(initials(symbol))}</div>`;
+    if (!iconUrl) return fb;
+    const hiddenFb = `<div class="token-fallback" style="display:none;background:hsl(${hue} 32% 20%)">${h(initials(symbol))}</div>`;
+    return `<div class="token-av"><img class="token-img" src="${h(iconUrl)}" alt="" width="32" height="32" onerror="this.style.display='none';var n=this.nextElementSibling;if(n)n.style.display='flex'">${hiddenFb}</div>`;
+  }
+
+  function pnlPill(pct) {
+    return `<span class="pnl-pill ${chgClass(pct)} nums">${h(fmtPct(pct))}</span>`;
+  }
+
+  function pnlStack(pct, usd) {
+    if (pct == null && usd == null) return "";
+    const dollar = usd == null ? "" : `<div class="pnl-usd tiny nums chg ${chgClass(usd)}">${usd >= 0 ? "+" : ""}${h(fmtUsd(usd, { exact: true }))}</div>`;
+    const pill = pct == null ? "" : pnlPill(pct);
+    return `<div class="pnl-stack">${pill}${dollar}</div>`;
+  }
+
+  function heroPnlBlock(d) {
+    const totU = Number(d.pnl_total_usd || 0);
+    const totP = d.pnl_total_pct;
+    const dayU = Number(d.pnl_today_usd || 0);
+    const dayP = d.pnl_today_pct;
+    const paper = String((d.mode || "PAPER")).toUpperCase() !== "LIVE";
+    return `<section class="hero">
+      <div class="hero-kicker">Värde${paper ? " · PAPER" : ""}</div>
+      <p class="hero-equity nums">${h(fmtUsd(d.equity_usd, { exact: true }))}</p>
+      <div class="hero-pnl">
+        ${pnlPill(totP)}
+        <span class="hero-pnl-usd chg ${chgClass(totU)} nums">${totU >= 0 ? "+" : ""}${h(fmtUsd(totU, { exact: true }))} sedan start</span>
+      </div>
+      <div class="hero-today">
+        <span class="k">Idag</span>
+        ${pnlPill(dayP)}
+        <span class="chg ${chgClass(dayU)} nums">${dayU >= 0 ? "+" : ""}${h(fmtUsd(dayU, { exact: true }))}</span>
+      </div>
+    </section>`;
+  }
+
+  function lanePnlCard(lanes) {
+    if (!lanes) return "";
+    const keys = [
+      ["memecoins", "Memecoins"],
+      ["meme_test", "Meme-test"],
+      ["majors", "Större coins"],
+      ["assets", "Tillgångar"]
+    ];
+    const rows = keys.map(([id, lab]) => {
+      const L = lanes[id] || {};
+      const usdIn = L.usd;
+      return `<div class="row">
+        <div class="row-body">
+          <div class="row-title">${h(lab)}</div>
+          <div class="row-sub">${usdIn != null ? h(fmtUsd(usdIn, { exact: true })) + " i spel" : ""}</div>
+        </div>
+        <div class="row-meta">${pnlStack(L.pnl_pct, L.pnl_usd)}</div>
+      </div>`;
+    }).join("");
+    return `<div class="card">
+      <div class="card-h">Spår</div>
+      ${rows}
+    </div>`;
+  }
+
+  function tradePnlMeta(it) {
+    const sell = it && (it.kind === "sell" || it.kind === "stop" || it.kind === "sold" || it.kind === "stopped");
+    if (!it || (it.pnl_usd == null && it.pnl_pct == null)) return "";
+    if (!sell && it.pnl_usd == null) return "";
+    if (it.pnl_pct != null) return pnlStack(it.pnl_pct, it.pnl_usd);
+    return `<div class="chg ${chgClass(it.pnl_usd)} nums">${h(fmtUsd(it.pnl_usd, { exact: true }))}</div>`;
   }
 
   function hashHue(s) {
@@ -274,7 +342,7 @@
   }
 
   function buildLabel() {
-    const raw = String(window.MMG_BUILD || "").trim() || "v12-20261125";
+    const raw = String(window.MMG_BUILD || "").trim() || "v13-20261125";
     const m = raw.match(/^(v\d+)-(\d{4})(\d{2})(\d{2})$/);
     if (!m) return raw;
     const months = ["jan", "feb", "mars", "apr", "maj", "juni", "juli", "aug", "sep", "okt", "nov", "dec"];
@@ -561,14 +629,7 @@
       ${window.DeskFun ? DeskFun.ticker(state.ticker && state.ticker.items) : ""}
       ${greetingBanner(d)}
       ${window.DeskFun && state.fun ? DeskFun.streakChip(state.fun.streak) : ""}
-      <section class="hero">
-        <div class="hero-kicker">Värde${String((d.mode||"PAPER")).toUpperCase()==="LIVE" ? "" : " · PAPER"}</div>
-        <p class="hero-equity nums">${h(fmtUsd(d.equity_usd, { exact: true }))}</p>
-        <div class="hero-pnl">
-          <span class="chg ${chgClass(pnl)} nums">${pnl >= 0 ? "+" : ""}${h(fmtUsd(pnl, { exact: true }))} idag</span>
-          <span class="sub chg ${chgClass(d.pnl_today_pct)} nums">${h(fmtPct(d.pnl_today_pct))}</span>
-        </div>
-      </section>
+      ${heroPnlBlock(d)}
       ${riskMeter(d && d.risk)}
       ${liveFeedCard()}
       ${window.DeskFun && state.fun ? DeskFun.mood(state.fun.mood) : ""}
@@ -617,31 +678,23 @@
         }).join("")}
       </div>
 
-      ${lanes ? `<div class="card">
-        <div class="card-h">Spår</div>
-        <div class="lane-bar"><span class="mem" style="width:${Number(lanes.memecoins && lanes.memecoins.pct) || 0}%"></span><span class="maj" style="width:${Number(lanes.majors && lanes.majors.pct) || 0}%"></span><span class="gold" style="width:${Number(lanes.gold && lanes.gold.pct) || 0}%"></span></div>
-        <div class="lane-legend">
-          <span><b>${h((lanes.memecoins && lanes.memecoins.pct) || 0)}%</b> Memecoins</span>
-          <span><b>${h((lanes.majors && lanes.majors.pct) || 0)}%</b> Större coins</span>
-          <span><b>${h((lanes.gold && lanes.gold.pct) || 0)}%</b> Guld</span>
-        </div>
-      </div>` : ""}
+      ${lanePnlCard(lanes)}
 
       ${laneFilterRow()}
 
       <div class="card">
         <div class="card-h">Öppna positioner</div>
         ${positions.length ? positions.map((p, i) => assetRow(p, `
-            ${tokenAvatar(p.symbol, p.mint)}
+            ${tokenAvatar(p.symbol, p.mint, p.icon_url)}
             <div class="row-body">
               <div class="row-title">${h(p.symbol)}${laneChip(laneOf(p))}</div>
-              <div class="row-sub">${h(fmtUsd(p.value_usd || p.size_usd))} · entry ${h(fmtUsd(p.entry_usd))}</div>
+              <div class="row-sub">${h(p.name || "")}${p.name ? " · " : ""}entry ${h(fmtUsd(p.entry_usd))}</div>
             </div>
             <div class="row-meta">
-              <div class="chg ${chgClass(p.pnl_usd)} nums">${h(fmtPct(p.pnl_pct))}</div>
-              <div class="tiny nums">${p.pnl_usd >= 0 ? "+" : ""}${h(fmtUsd(p.pnl_usd, { exact: true }))}</div>
+              <div class="asset-val nums">${h(fmtUsd(p.value_usd || p.size_usd, { exact: true }))}</div>
+              ${pnlStack(p.pnl_pct, p.pnl_usd)}
             </div>
-            ${assetLinkOf(p) ? svg("chev") : ""}`, "row has-avatar", i === 0 ? 'style="padding-top:14px"' : "")).join("") : `<div class="state" style="padding:28px 16px"><p>Inga öppna positioner.</p></div>`}
+            ${assetLinkOf(p) ? svg("chev") : ""}`, "row has-avatar asset-row", "")).join("") : `<div class="state" style="padding:28px 16px"><p>Inga öppna positioner.</p></div>`}
       </div>
 
       ${window.DeskFun && state.fun ? DeskFun.week(state.fun.week) + DeskFun.meme(state.fun.meme) + DeskFun.chat(state.fun.chat, 8) : ""}
@@ -702,7 +755,7 @@
       ${pos ? `<div class="card">
         <div class="card-h">Din PAPER-position</div>
         <div class="row"><div class="row-body"><div class="row-title">Värde</div></div><div class="row-meta nums">${h(fmtUsd(pos.value_usd || pos.size_usd, { exact: true }))}</div></div>
-        <div class="row"><div class="row-body"><div class="row-title">Resultat</div></div><div class="row-meta chg ${chgClass(pos.pnl_usd)} nums">${h(fmtPct(pos.pnl_pct))} · ${pos.pnl_usd >= 0 ? "+" : ""}${h(fmtUsd(pos.pnl_usd, { exact: true }))}</div></div>
+        <div class="row"><div class="row-body"><div class="row-title">Resultat</div></div><div class="row-meta">${pnlStack(pos.pnl_pct, pos.pnl_usd)}</div></div>
         <div class="row"><div class="row-body"><div class="row-title">Köpt vid</div></div><div class="row-meta nums">${h(fmtUsd(pos.entry_usd))}</div></div>
       </div>` : ""}
 
@@ -876,7 +929,7 @@
           </div>
           <div class="row-meta">
             <div class="tiny">${h(sthlmStamp(it.ts) || relTime(it.ts))}</div>
-            ${it.pnl_usd != null && (it.kind === "sell" || it.kind === "stop") ? `<div class="chg ${chgClass(it.pnl_usd)} nums">${h(fmtUsd(it.pnl_usd, { exact: true }))}</div>` : ""}
+            ${tradePnlMeta(it)}
           </div>
           ${assetLinkOf(it) ? svg("chev") : ""}`;
         return assetRow(it, inner);
@@ -915,7 +968,7 @@
         </div>
         <div class="row-meta">
           <div class="tiny">${h(sthlmStamp(it.ts) || relTime(it.ts))}</div>
-          ${it.pnl_usd != null ? `<div class="chg ${chgClass(it.pnl_usd)} nums">${h(fmtUsd(it.pnl_usd, { exact: true }))}</div>` : ""}
+          ${tradePnlMeta(it)}
         </div>
         ${assetLinkOf(it) ? svg("chev") : ""}`;
       return assetRow(it, inner);
@@ -1038,6 +1091,7 @@
         <h2>Moneymaking G</h2>
         <p>Körs dygnet runt · ${mode === "LIVE" ? "LIVE" : "PAPER"}-läge</p>
       </div>
+      ${d ? `<div class="card account-pnl">${heroPnlBlock(d)}</div>` : ""}
 
       <div class="card">
         <div class="card-h">Phantom-plånbok (botens)</div>
