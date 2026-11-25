@@ -35,11 +35,40 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      # upload-pages-artifact and deploy-pages in one job can miss the
-      # artifact; listing it from a later job avoids that race.
       - name: Wait for the Pages artifact to be listable
         run: sleep 20
 
+      - name: Ensure GitHub Pages is enabled
+        id: pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          gh api "repos/${GITHUB_REPOSITORY}/pages" > /tmp/pages.json
+          get_status=$?
+          set -e
+          if [ "$get_status" -eq 0 ]; then
+            echo "Pages site already exists"
+            cat /tmp/pages.json
+            build_type=$(jq -r '.build_type // empty' /tmp/pages.json)
+            echo "build_type=${build_type}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Pages site is not enabled yet. Trying branch source main /"
+          if gh api --method POST "repos/${GITHUB_REPOSITORY}/pages" --input - <<'EOF'
+          {"source":{"branch":"main","path":"/"}}
+          EOF
+          then
+            echo "build_type=legacy" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Branch source was rejected. Enabling the Actions build type."
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/pages" -f build_type=workflow
+          echo "build_type=workflow" >> "$GITHUB_OUTPUT"
+
       - name: Deploy to GitHub Pages
         id: deployment
+        if: steps.pages.outputs.build_type == 'workflow' || steps.pages.outputs.build_type == ''
         uses: actions/deploy-pages@v5
