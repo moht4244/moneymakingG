@@ -103,7 +103,6 @@
     reqError: "",
     liveQuotes: {},
     quotesLoading: false,
-    bridgeOpen: false,
     chatter: null,
     coin: null,
     audit: null,
@@ -782,18 +781,75 @@
     const remoteItems = (state.requests && state.requests.items) || [];
     const localItems = readLocalRequests();
     const merged = [];
-    const seenKeys = new Set();
+    const remoteMap = new Map();
     remoteItems.forEach((r) => {
       const k = (r.mint || r.symbol || "").toUpperCase();
-      if (k) seenKeys.add(k);
+      if (k) remoteMap.set(k, r);
       merged.push(Object.assign({ origin: "server" }, r));
     });
+    const keptLocal = [];
     localItems.forEach((r) => {
       const k = (r.mint || r.symbol || "").toUpperCase();
-      if (k && seenKeys.has(k)) return;
-      merged.push(Object.assign({ origin: "local", status: "local" }, r));
+      const srv = k ? remoteMap.get(k) : null;
+      if (srv) {
+        if (r.pending_remove) {
+          const idx = merged.findIndex((x) => x.origin === "server" && ((x.mint || x.symbol || "").toUpperCase() === k));
+          if (idx >= 0) merged[idx] = Object.assign({}, merged[idx], { status: "pending", bot_reply: "Tar bort via Telegram…" });
+          keptLocal.push(r);
+          return;
+        }
+        const sameAlerts = (srv.alert_above ?? null) === (r.alert_above ?? null) && (srv.alert_below ?? null) === (r.alert_below ?? null);
+        if (sameAlerts) return;
+        const idx = merged.findIndex((x) => x.origin === "server" && ((x.mint || x.symbol || "").toUpperCase() === k));
+        if (idx >= 0) {
+          merged[idx] = Object.assign({}, merged[idx], {
+            alert_above: r.alert_above, alert_below: r.alert_below, status: "pending"
+          });
+        }
+        keptLocal.push(r);
+        return;
+      }
+      if (!r.pending_remove) {
+        merged.push(Object.assign({ origin: "local", status: "pending" }, r));
+        keptLocal.push(r);
+      }
     });
+    if (keptLocal.length !== localItems.length) writeLocalRequests(keptLocal);
     return merged;
+  }
+
+  function telegramBotName() {
+    return (state.desk && state.desk.telegram && state.desk.telegram.bot_username) || "MONEYMAKINgGGG_BOT";
+  }
+
+  function buildBevakaCmd(symbolOrMint, above, below) {
+    let cmd = "/bevaka " + String(symbolOrMint || "").trim().replace(/^\$/, "");
+    if (above != null && isFinite(above)) cmd += " over " + above;
+    if (below != null && isFinite(below)) cmd += " under " + below;
+    return cmd;
+  }
+
+  function openTelegramCmd(cmd) {
+    const bot = telegramBotName();
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(cmd).catch(() => {});
+      }
+    } catch (_) {}
+    const url = "https://t.me/" + encodeURIComponent(bot) + "?text=" + encodeURIComponent(cmd);
+    try {
+      const w = window.open(url, "_blank", "noopener");
+      if (!w) {
+        const a = document.createElement("a");
+        a.href = url;
+        a.target = "_blank";
+        a.rel = "noopener";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
+    } catch (_) {}
+    return url;
   }
 
   function quoteForWatchItem(r) {
@@ -836,8 +892,7 @@
           <input class="req-input" type="text" name="note" value="${h(state.reqFormNote)}" placeholder="Valfri kommentar (t.ex. Kolla volym / rapport)" autocomplete="off">
           ${state.reqError ? `<div class="lock-error" style="margin:0;text-align:left">${h(state.reqError)}</div>` : ""}
           <button type="submit" class="btn btn-gold" style="margin:2px 0 0" ${state.reqBusy ? "disabled" : ""}>${state.reqBusy ? "Sparar…" : "Lägg till & begär koll"}</button>
-          <div class="tiny" style="line-height:1.4">Livepris & 24h-utveckling visas nedan. Prislarm skickas direkt via Telegram enligt din larmregel. Botar använder listan som mjuk signal (säkerhetsregler går alltid först).</div>
-          ${!canWrite ? `<div class="req-hint-box">På GitHub Pages sparas nya bevakningar lokalt med livepris här i appen. För 24/7 Telegram-prislarm och bot-koll: koppla <b>API-brygga</b> under Mer eller tryck <b>Kopiera</b> nedan.</div>` : ""}
+          <div class="tiny" style="line-height:1.4">Livepris & 24h-utveckling visas nedan. Prislarm skickas direkt via Telegram, och botarna använder listan som mjuk signal (säkerhetsregler går alltid först).</div>
         </form>
       </div>
 
@@ -889,8 +944,7 @@
               <span>${h(sthlmStamp((q && q.ts) || r.quote_ts || r.updated_at || r.created_at) || "nyss")}${r.score != null ? ` · Betyg ${Math.round(r.score)}` : ""}</span>
               <div class="req-actions">
                 <button type="button" class="btn-small" data-toggle-alert-edit="${h(r.id)}">🔔 Larm</button>
-                ${r.origin === "local" ? `<button type="button" class="btn-small gold" data-copy-req="${h(copyText)}">Kopiera</button>` : ""}
-                <button type="button" class="btn-small" data-del-req="${h(r.id)}" data-req-origin="${h(r.origin || "server")}">Ta bort</button>
+                <button type="button" class="btn-small" data-del-req="${h(r.id)}" data-req-origin="${h(r.origin || "server")}" data-req-sym="${h(r.symbol)}">Ta bort</button>
               </div>
             </div>
           </div>`;
@@ -1097,7 +1151,6 @@
     const unlocked = DeskAPI.isUnlocked && DeskAPI.isUnlocked();
     const mode = (d && d.mode) || "PAPER";
     const botCount = ((d && d.bots) || []).length || 17;
-    const br = DeskAPI.getBridge ? DeskAPI.getBridge() : { url: "", token: "" };
     return `${topbar({ title: "Mer", right: pillPaperOrLive(mode) })}
     <div class="screen"><div class="page">
       <div class="account-hero">
@@ -1150,21 +1203,6 @@
           <button class="copy-btn" data-action="notify">Slå på</button>
         </div>
         ${window.DeskFun ? DeskFun.soundToggle() : ""}
-        <div class="row">
-          <div class="row-body">
-            <div class="row-title">API-brygga (valfri)</div>
-            <div class="row-sub">${br.url ? "Kopplad till egen adress" : "Ej kopplad · endast lokal kö på Pages"}</div>
-          </div>
-          <button type="button" class="copy-btn" data-action="toggle-bridge">${state.bridgeOpen ? "Stäng" : "Ställ in"}</button>
-        </div>
-        ${state.bridgeOpen ? `<form class="bridge-form" data-bridge-form>
-          <input class="req-input" type="url" name="url" value="${h(br.url)}" placeholder="https://din-tunnel.exempel.se">
-          <input class="req-input" type="password" name="token" value="${h(br.token)}" placeholder="APP_TOKEN">
-          <div style="display:flex;gap:8px">
-            <button type="submit" class="btn btn-gold" style="margin:0;height:40px;font-size:14px">Spara brygga</button>
-            <button type="button" class="btn btn-secondary" data-action="clear-bridge" style="margin:0;height:40px;font-size:14px">Rensa</button>
-          </div>
-        </form>` : ""}
         <div class="row"><div class="row-body"><div class="row-title">Version</div><div class="row-sub">${h(buildLabel())}</div></div></div>
       </div>
 
@@ -2000,24 +2038,9 @@
     state.reqError = "";
     render({ keepScroll: true });
     try {
-      const res = await DeskAPI.submitRequest({
-        symbol: clean,
-        asset_type: assetType || "auto",
-        note: note || "",
-        alert_above: above,
-        alert_below: below
-      });
-      if (res && res.ok && res.item) {
-        const cur = (state.requests && state.requests.items) || [];
-        state.requests = Object.assign({}, state.requests || {}, {
-          items: [res.item].concat(cur.filter((x) => x.id !== res.item.id))
-        });
-        state.reqFormSym = "";
-        state.reqFormNote = "";
-        state.reqFormAbove = "";
-        state.reqFormBelow = "";
-        toast(`${res.item.symbol} tillagd i bevakningen`);
-      } else {
+      const canWrite = !!(DeskAPI.canWriteRemote && DeskAPI.canWriteRemote());
+      if (!canWrite) {
+        const cmd = buildBevakaCmd(clean, above, below);
         const list = readLocalRequests();
         const item = {
           id: "loc-" + Date.now(),
@@ -2028,8 +2051,8 @@
           alert_above: above,
           alert_below: below,
           alert_triggered_at: null,
-          status: "local",
-          bot_reply: "Sparad i din lokala bevakning. Tryck Kopiera för att skicka till botarna i chatten.",
+          status: "pending",
+          bot_reply: "Skicka i Telegram — synkas till botarna inom 1 min.",
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         };
@@ -2038,7 +2061,27 @@
         state.reqFormNote = "";
         state.reqFormAbove = "";
         state.reqFormBelow = "";
-        toast(`${item.symbol} sparad i lokal kö`);
+        openTelegramCmd(cmd);
+        toast(`Öppnar Telegram för ${item.symbol}…`);
+      } else {
+        const res = await DeskAPI.submitRequest({
+          symbol: clean,
+          asset_type: assetType || "auto",
+          note: note || "",
+          alert_above: above,
+          alert_below: below
+        });
+        if (res && res.ok && res.item) {
+          const cur = (state.requests && state.requests.items) || [];
+          state.requests = Object.assign({}, state.requests || {}, {
+            items: [res.item].concat(cur.filter((x) => x.id !== res.item.id))
+          });
+          state.reqFormSym = "";
+          state.reqFormNote = "";
+          state.reqFormAbove = "";
+          state.reqFormBelow = "";
+          toast(`${res.item.symbol} tillagd i bevakningen`);
+        }
       }
       refreshWatchQuotes(true);
     } catch (e) {
@@ -2075,13 +2118,26 @@
         toast("Ogiltigt larmpris");
         return;
       }
-      if (origin === "local") {
-        const upd = readLocalRequests().map((x) => String(x.id) === String(id)
-          ? Object.assign({}, x, { alert_above: above, alert_below: below, alert_triggered_at: null, updated_at: new Date().toISOString() })
-          : x);
+      const canWrite = !!(DeskAPI.canWriteRemote && DeskAPI.canWriteRemote());
+      if (origin === "local" || !canWrite) {
+        const targetItem = mergedWatchItems().find((x) => String(x.id) === String(id));
+        const symOrMint = (targetItem && (targetItem.mint || targetItem.symbol)) || "";
+        const list = readLocalRequests();
+        const exists = list.some((x) => String(x.id) === String(id) || (symOrMint && String(x.symbol || "").toUpperCase() === symOrMint.toUpperCase()));
+        let upd;
+        if (exists) {
+          upd = list.map((x) => (String(x.id) === String(id) || (symOrMint && String(x.symbol || "").toUpperCase() === symOrMint.toUpperCase()))
+            ? Object.assign({}, x, { alert_above: above, alert_below: below, alert_triggered_at: null, status: "pending", updated_at: new Date().toISOString() })
+            : x);
+        } else if (targetItem) {
+          upd = [Object.assign({}, targetItem, { origin: "local", alert_above: above, alert_below: below, alert_triggered_at: null, status: "pending", updated_at: new Date().toISOString() })].concat(list);
+        } else {
+          upd = list;
+        }
         writeLocalRequests(upd);
         state.reqEditId = null;
-        toast("Prislarm uppdaterat");
+        if (symOrMint) openTelegramCmd(buildBevakaCmd(symOrMint, above, below));
+        toast("Öppnar Telegram för prislarm…");
         render({ keepScroll: true });
       } else {
         DeskAPI.updateRequest(id, { alert_above: above, alert_below: below }).then((res) => {
@@ -2093,17 +2149,6 @@
           render({ keepScroll: true });
         }).catch(() => toast("Kunde inte spara prislarm"));
       }
-      return;
-    }
-    const bridgeForm = e.target.closest("[data-bridge-form]");
-    if (bridgeForm) {
-      e.preventDefault();
-      const u = (bridgeForm.querySelector("[name=url]") || {}).value || "";
-      const t = (bridgeForm.querySelector("[name=token]") || {}).value || "";
-      if (DeskAPI.setBridge) DeskAPI.setBridge(u, t);
-      state.bridgeOpen = false;
-      toast(u ? "API-brygga sparad" : "API-brygga rensad");
-      render({ keepScroll: true });
       return;
     }
     const form = e.target.closest("[data-pass-form]");
@@ -2248,9 +2293,18 @@
       e.preventDefault();
       const id = delReq.getAttribute("data-del-req");
       const origin = delReq.getAttribute("data-req-origin");
+      const sym = delReq.getAttribute("data-req-sym") || "";
+      const canWrite = !!(DeskAPI.canWriteRemote && DeskAPI.canWriteRemote());
       if (origin === "local") {
         writeLocalRequests(readLocalRequests().filter((x) => String(x.id) !== String(id)));
         toast("Borttagen");
+        render({ keepScroll: true });
+      } else if (!canWrite) {
+        const list = readLocalRequests().filter((x) => String(x.symbol || "").toUpperCase() !== sym.toUpperCase());
+        list.push({ id: "rm-" + Date.now(), symbol: sym, pending_remove: true, created_at: new Date().toISOString() });
+        writeLocalRequests(list);
+        openTelegramCmd("/sluta " + sym);
+        toast("Öppnar Telegram för att ta bort…");
         render({ keepScroll: true });
       } else {
         DeskAPI.deleteRequest(id).then(() => {
@@ -2330,8 +2384,6 @@
     const action = e.target.closest("[data-action]");
     if (!action) return;
     const act = action.getAttribute("data-action");
-    if (act === "toggle-bridge") { e.preventDefault(); state.bridgeOpen = !state.bridgeOpen; render({ keepScroll: true }); return; }
-    if (act === "clear-bridge") { e.preventDefault(); if (DeskAPI.setBridge) DeskAPI.setBridge("", ""); state.bridgeOpen = false; toast("API-brygga rensad"); render({ keepScroll: true }); return; }
     if (act === "login-again" || act === "retry") {
       e.preventDefault();
       if (DeskAPI.logout) DeskAPI.logout();

@@ -722,26 +722,17 @@
       return liveGet("/api/requests");
     },
 
-    getBridge,
-    setBridge,
-
     canWriteRemote() {
-      const b = getBridge();
-      if (b.url && b.token) return true;
       return !isSnapshotOnly() && !!getToken();
     },
 
     async submitRequest(payload) {
-      const b = getBridge();
-      const useBridge = isSnapshotOnly() || (b.url && b.token);
-      if (isSnapshotOnly() && !(b.url && b.token)) {
-        return { ok: false, mode: "hosted_local" };
-      }
-      const target = useBridge && b.url ? (b.url + "/api/requests") : apiUrl("/api/requests");
-      const h = { "Content-Type": "application/json", Accept: "application/json" };
-      const tok = (useBridge && b.token) ? b.token : getToken();
-      if (tok) { h["Authorization"] = "Bearer " + tok; h["X-App-Token"] = tok; }
-      const res = await fetch(target, { method: "POST", headers: h, body: JSON.stringify(payload || {}) });
+      if (isSnapshotOnly()) return { ok: false, mode: "hosted_local" };
+      const res = await fetch(apiUrl("/api/requests"), {
+        method: "POST",
+        headers: Object.assign({ "Content-Type": "application/json" }, headers()),
+        body: JSON.stringify(payload || {})
+      });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         const err = new Error(data.detail || ("HTTP " + res.status));
@@ -752,31 +743,19 @@
     },
 
     async deleteRequest(id) {
-      const b = getBridge();
-      if (isSnapshotOnly() && !(b.url && b.token)) {
-        return { ok: false, mode: "hosted_local" };
-      }
-      const useBridge = isSnapshotOnly() || (b.url && b.token);
-      const target = useBridge && b.url ? (b.url + "/api/requests/" + encodeURIComponent(id)) : apiUrl("/api/requests/" + encodeURIComponent(id));
-      const h = { Accept: "application/json" };
-      const tok = (useBridge && b.token) ? b.token : getToken();
-      if (tok) { h["Authorization"] = "Bearer " + tok; h["X-App-Token"] = tok; }
-      const res = await fetch(target, { method: "DELETE", headers: h });
+      if (isSnapshotOnly()) return { ok: false, mode: "hosted_local" };
+      const res = await fetch(apiUrl("/api/requests/" + encodeURIComponent(id)), { method: "DELETE", headers: headers() });
       if (!res.ok) throw new Error("HTTP " + res.status);
       return res.json();
     },
 
     async updateRequest(id, payload) {
-      const b = getBridge();
-      if (isSnapshotOnly() && !(b.url && b.token)) {
-        return { ok: false, mode: "hosted_local" };
-      }
-      const useBridge = isSnapshotOnly() || (b.url && b.token);
-      const target = useBridge && b.url ? (b.url + "/api/requests/" + encodeURIComponent(id)) : apiUrl("/api/requests/" + encodeURIComponent(id));
-      const h = { "Content-Type": "application/json", Accept: "application/json" };
-      const tok = (useBridge && b.token) ? b.token : getToken();
-      if (tok) { h["Authorization"] = "Bearer " + tok; h["X-App-Token"] = tok; }
-      const res = await fetch(target, { method: "PATCH", headers: h, body: JSON.stringify(payload || {}) });
+      if (isSnapshotOnly()) return { ok: false, mode: "hosted_local" };
+      const res = await fetch(apiUrl("/api/requests/" + encodeURIComponent(id)), {
+        method: "PATCH",
+        headers: Object.assign({ "Content-Type": "application/json" }, headers()),
+        body: JSON.stringify(payload || {})
+      });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         const err = new Error(data.detail || ("HTTP " + res.status));
@@ -787,16 +766,8 @@
     },
 
     async refreshRequests() {
-      const b = getBridge();
-      if (isSnapshotOnly() && !(b.url && b.token)) {
-        return { ok: false, mode: "hosted_local" };
-      }
-      const useBridge = isSnapshotOnly() || (b.url && b.token);
-      const target = useBridge && b.url ? (b.url + "/api/requests/refresh") : apiUrl("/api/requests/refresh");
-      const h = { Accept: "application/json" };
-      const tok = (useBridge && b.token) ? b.token : getToken();
-      if (tok) { h["Authorization"] = "Bearer " + tok; h["X-App-Token"] = tok; }
-      const res = await fetch(target, { method: "POST", headers: h });
+      if (isSnapshotOnly()) return { ok: false, mode: "hosted_local" };
+      const res = await fetch(apiUrl("/api/requests/refresh"), { method: "POST", headers: headers() });
       if (!res.ok) throw new Error("HTTP " + res.status);
       return res.json();
     },
