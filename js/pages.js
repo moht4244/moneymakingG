@@ -340,7 +340,7 @@
             <div class="name">${h(c.name || stats.name || "")}</div>
           </div>
         </div>
-        <div class="coin-price nums" id="coin-px">${h(fmtUsd(livePx))}</div>
+        <div class="coin-price nums" id="coin-px">${h(fmtUsd(livePx, { exact: true, cents: livePx != null && Math.abs(livePx) >= 1 }))}</div>
         <div class="chg ${chgClass(chg)} nums" id="coin-chg">${h(fmtPct(chg))} <span class="sub muted">${h(tf)}</span></div>
         <div class="coin-tf" data-role="coin-tf">
           ${TFS.map((t) => `<button type="button" class="tf-btn ${tf === t.id ? "on" : ""}" data-coin-tf="${t.id}">${t.label}</button>`).join("")}
@@ -397,14 +397,14 @@
           if (!info) {
             const last = pts.length ? pts[pts.length - 1].p : c.price_usd;
             const chg = changeOf(pts);
-            px.textContent = u.fmtUsd(last);
+            px.textContent = u.fmtUsd(last, { exact: true, cents: last != null && Math.abs(last) >= 1 });
             if (ch) {
               ch.textContent = (u.fmtPct(chg) || "—") + " " + (state.coinTf || "1D");
               ch.className = "chg " + (u.chgClass ? u.chgClass(chg) : "") + " nums";
             }
             return;
           }
-          px.textContent = u.fmtUsd(info.price);
+          px.textContent = u.fmtUsd(info.price, { exact: true, cents: info.price != null && Math.abs(info.price) >= 1 });
           const chg = info.first ? 100 * (info.price / info.first - 1) : null;
           if (ch) {
             const when = info.t ? new Date(info.t).toLocaleString("sv-SE", { timeZone: "Europe/Stockholm", hour: "2-digit", minute: "2-digit", day: "numeric", month: "short" }) : "";
@@ -420,9 +420,10 @@
       if (!c) return;
       const tf = state.coinTf || "1D";
       try {
+        const tickerOnly = c.mint && !isMint(c.mint);
         const [chart, stats] = await Promise.all([
-          DeskMarket.ohlcv({ mint: c.mint, symbol: c.symbol, id: c.mint, lane: c.lane, category: c.lane, venue: c.venue, chart: c.chart }, tf),
-          isMint(c.mint) ? DeskMarket.tokenStats(c.mint).catch(() => null) : null
+          DeskMarket.ohlcv({ mint: isMint(c.mint) ? c.mint : "", symbol: c.symbol, id: c.mint, lane: c.lane, category: c.lane, venue: c.venue, chart: c.chart }, tf),
+          (!tickerOnly && isMint(c.mint) && (c.lane || "").indexOf("meme") === 0) ? DeskMarket.tokenStats(c.mint).catch(() => null) : (isMint(c.mint) && c.lane !== "majors" ? DeskMarket.tokenStats(c.mint).catch(() => null) : null)
         ]);
         state.coinChart = chart;
         if (stats) {
@@ -537,7 +538,8 @@
       const next = new Date(yy, mm, 1);
       const prevId = prev.getFullYear() + "-" + String(prev.getMonth() + 1).padStart(2, "0");
       const nextId = next.getFullYear() + "-" + String(next.getMonth() + 1).padStart(2, "0");
-      const picked = state.calDay || null;
+      const todayId = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Stockholm", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+      const picked = state.calDay || (byDate[todayId] ? todayId : null);
       const pickedRow = picked && byDate[picked];
       const cells = [];
       for (let i = 0; i < startWd; i++) cells.push({ empty: true });
@@ -600,8 +602,8 @@
       <div class="screen"><div class="page">
         <div class="card live-clock">
           <div class="card-h">Nedräkning till LIVE</div>
-          <div class="clock-days nums">${h(Math.floor(days))} <span>av ${h(need)} dagar</span></div>
-          <div class="clock-sub">${clock.required_met ? "60-dagarsregeln är klar." : h(left.toFixed(1).replace(".", ",")) + " dagar kvar i PAPER."}</div>
+          <div class="clock-days nums">${clock.required_met ? h(need) : ("Dag " + h(Math.min(need, Math.floor(days) + 1)))} <span>av ${h(need)} dagar</span></div>
+          <div class="clock-sub">${clock.required_met ? "60-dagarsregeln är klar." : h(String(left.toFixed(1)).replace(".", ",")) + " dagar kvar i PAPER."}</div>
           <div class="mood-lane-track"><span class="mood-lane-fill ${clock.required_met ? "up" : "warn"}" style="width:${pct}%"></span></div>
           <p class="tiny" style="margin-top:10px;line-height:1.4">Appens egen regel: minst ${h(need)} dagar i PAPER. Inget går live förrän varje spår klarar bevisen och du själv skriver LIVE.</p>
         </div>

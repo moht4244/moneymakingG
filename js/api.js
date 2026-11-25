@@ -466,11 +466,20 @@
     const s = snapCache || {};
     const st = s.state || {};
     const wantId = String(id || "");
-    const pos = (st.positions || []).find((p) => p.mint === id || String(p.symbol || "").toUpperCase() === wantId.toUpperCase()) || null;
+    const tickerOnly = /^[A-Z0-9.]{1,12}$/.test(wantId.toUpperCase()) && !isSolanaMint(wantId);
+    const tickU0 = wantId.toUpperCase();
+    const MAJOR_TICKS = { BTC:1, ETH:1, SOL:1, DOGE:1, XRP:1, ADA:1, AVAX:1, LINK:1, DOT:1, LTC:1, BNB:1, SUI:1, WBTC:1, WETH:1, PAXG:1 };
+    const pos = (st.positions || []).find((p) => {
+      if (p.mint === id) return true;
+      if (!tickerOnly) return false;
+      if (String(p.symbol || "").toUpperCase() !== tickU0) return false;
+      if (MAJOR_TICKS[tickU0] && (p.lane || "").indexOf("meme") === 0) return false;
+      return true;
+    }) || null;
     const found = snapFindAsset(id);
-    const symbol = (pos && pos.symbol) || (found && found.symbol) || (/^[A-Z0-9.]{1,12}$/.test(wantId.toUpperCase()) ? wantId.toUpperCase() : null);
-    const name = (pos && pos.name) || (found && found.name) || symbol;
-    const lane = (pos && pos.lane) || (found && found.lane) || (found && found.category) || null;
+    let symbol = (pos && pos.symbol) || (found && found.symbol) || (tickerOnly ? tickU0 : null);
+    let name = (pos && pos.name) || (found && found.name) || symbol;
+    let lane = (pos && pos.lane) || (found && found.lane) || (found && found.category) || null;
     let price = (pos && (pos.mark_usd || pos.price_usd)) || (found && (found.price || found.price_usd || found.mark_usd)) || null;
     let change = found && (found.change_pct != null ? found.change_pct : found.change_24h);
     const mkt = st.market || {};
@@ -479,7 +488,16 @@
       price = mkt[tickU.toLowerCase()].price;
       if (change == null) change = mkt[tickU.toLowerCase()].change_24h_pct;
     }
-    const known = /^(BTC|ETH|SOL|DOGE|XRP|ADA|AVAX|LINK|DOT|LTC|BNB|SUI|PAXG|BONK|WBTC|WETH|GOLD|AAPL|MSFT|NVDA|TSLA)$/.test(tickU);
+    let resolvedMint = (pos && pos.mint) || (found && found.mint) || id;
+    if (tickerOnly && MAJOR_TICKS[tickU]) {
+      lane = (pos && pos.lane === "majors") ? "majors" : (lane === "majors" ? "majors" : "majors");
+      const official = ((s.majors && (s.majors.coins || s.majors.universe)) || []).find((c) => String(c.symbol || "").toUpperCase() === tickU);
+      // ticker pages (e.g. #/coin/BTC) stay on the major — don't inherit a memecoin mint or its stats
+      if (official && official.mint) resolvedMint = official.mint;
+      else resolvedMint = tickU;
+      if (!name || name === symbol) name = ({ BTC: "Bitcoin", ETH: "Ethereum", SOL: "Solana", WBTC: "Wrapped Bitcoin", WETH: "Wrapped Ethereum", PAXG: "PAX Gold" })[tickU] || name;
+    }
+    const known = !!MAJOR_TICKS[tickU] || /^(BONK|GOLD|AAPL|MSFT|NVDA|TSLA)$/.test(tickU);
     const empty = !pos && !found && !symbol && !known;
     const links = assetLink({ mint: id, symbol, lane, category: found && found.category, venue: found && found.venue });
     const wantU = String((symbol || id) || "").toUpperCase();
@@ -489,7 +507,7 @@
     markers.forEach((m) => { if (m.reason) reasons.push({ ts: m.t, side: m.side, bot: m.bot, text: m.reason }); });
     if (found && (found.thesis || found.reason)) reasons.push({ ts: null, side: "thesis", bot: "brain", text: found.thesis || found.reason });
     return {
-      mint: (pos && pos.mint) || (found && found.mint) || id,
+      mint: resolvedMint,
       symbol: symbol || null, name: name || null, lane, venue: found && found.venue,
       price_usd: price, change_1h: found && found.change_1h, change_24h: change,
       mc_usd: found && found.mc_usd, fdv_usd: found && found.fdv_usd, liq_usd: found && found.liq_usd,
