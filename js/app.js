@@ -271,6 +271,15 @@
     </form>`;
   }
 
+  function buildLabel() {
+    const raw = String(window.MMG_BUILD || "").trim() || "v10-20261125";
+    const m = raw.match(/^(v\d+)-(\d{4})(\d{2})(\d{2})$/);
+    if (!m) return raw;
+    const months = ["jan", "feb", "mars", "apr", "maj", "juni", "juli", "aug", "sep", "okt", "nov", "dec"];
+    const mon = months[Number(m[3]) - 1] || m[3];
+    return m[1] + " · " + Number(m[4]) + " " + mon + " " + m[2];
+  }
+
   function freshnessBlock() {
     const raw = (window.DeskAPI && DeskAPI.snapGeneratedAt && DeskAPI.snapGeneratedAt()) || "";
     if (!raw) return "";
@@ -1049,7 +1058,7 @@
         </div>
         ${window.DeskFun ? DeskFun.soundToggle() : ""}
         <a class="row" href="#/regler" data-nav="#/regler"><div class="row-body"><div class="row-title">Regler</div><div class="row-sub">Så här skyddas kontot</div></div>${svg("chev")}</a>
-        <div class="row"><div class="row-body"><div class="row-title">Version</div><div class="row-sub">v9 · 25 nov 2026</div></div></div>
+        <div class="row"><div class="row-body"><div class="row-title">Version</div><div class="row-sub">${h(buildLabel())}</div></div></div>
       </div>
 
       ${window.DeskFun ? DeskFun.laneHistory(state.lanes) : ""}
@@ -1102,6 +1111,121 @@
     requestAnimationFrame(apply);
   }
 
+  const PTR_THRESHOLD = 70;
+  const $ptr = document.createElement("div");
+  $ptr.className = "ptr";
+  $ptr.setAttribute("aria-live", "polite");
+  const ptr = { startY: 0, startX: 0, pulling: false, armed: false, dy: 0, busy: false, hideTimer: 0 };
+
+  function ensurePtr() {
+    if ($app && $ptr.parentNode !== $app) $app.appendChild($ptr);
+  }
+  function atScrollTop() {
+    if ((window.scrollY || document.documentElement.scrollTop || 0) > 0) return false;
+    const s = scroller();
+    if (s && s.scrollTop > 0) return false;
+    const feed = document.getElementById("chat-feed");
+    if (feed && feed.scrollTop > 0) return false;
+    return true;
+  }
+  function showPtr(text, opts) {
+    ensurePtr();
+    const o = opts || {};
+    $ptr.classList.add("show");
+    $ptr.classList.toggle("error", !!o.error);
+    $ptr.innerHTML = (o.spin ? '<div class="ptr-spin" aria-hidden="true"></div>' : "") +
+      (text ? '<div class="ptr-text">' + text + "</div>" : "");
+  }
+  function hidePtr() {
+    if (ptr.hideTimer) { clearTimeout(ptr.hideTimer); ptr.hideTimer = 0; }
+    $ptr.classList.remove("show", "error");
+    $ptr.style.transform = "";
+    $ptr.innerHTML = "";
+  }
+  function ptrOnStart(e) {
+    if (ptr.busy) return;
+    if (!(DeskAPI.isUnlocked && DeskAPI.isUnlocked())) return;
+    if (!e.touches || e.touches.length !== 1) return;
+    if (!atScrollTop()) { ptr.armed = false; return; }
+    ptr.armed = true;
+    ptr.pulling = false;
+    ptr.startY = e.touches[0].clientY;
+    ptr.startX = e.touches[0].clientX;
+    ptr.dy = 0;
+  }
+  function ptrOnMove(e) {
+    if (!ptr.armed || ptr.busy) return;
+    const t = e.touches && e.touches[0];
+    if (!t) return;
+    const dy = t.clientY - ptr.startY;
+    const dx = t.clientX - ptr.startX;
+    if (!ptr.pulling) {
+      if (dy < 8) return;
+      if (Math.abs(dx) > dy) { ptr.armed = false; return; }
+      if (!atScrollTop()) { ptr.armed = false; return; }
+      ptr.pulling = true;
+    }
+    if (ptr.pulling && dy > 0) {
+      e.preventDefault();
+      ptr.dy = dy;
+      const offset = Math.min(96, dy * 0.45);
+      ensurePtr();
+      $ptr.classList.add("show");
+      $ptr.classList.remove("error");
+      $ptr.style.transform = "translateY(" + offset + "px)";
+      $ptr.innerHTML = '<div class="ptr-spin" aria-hidden="true"></div>' +
+        (dy >= PTR_THRESHOLD ? '<div class="ptr-text">Uppdaterar...</div>' : "");
+    }
+  }
+  function ptrOnEnd() {
+    if (!ptr.pulling) {
+      ptr.armed = false;
+      ptr.dy = 0;
+      if (!ptr.busy) { $ptr.style.transform = ""; if (!$ptr.classList.contains("error")) hidePtr(); }
+      return;
+    }
+    const go = ptr.dy >= PTR_THRESHOLD;
+    ptr.pulling = false;
+    ptr.armed = false;
+    ptr.dy = 0;
+    if (go) pullRefresh();
+    else { $ptr.style.transform = ""; hidePtr(); }
+  }
+  async function pullRefresh() {
+    if (ptr.busy) return;
+    if (!(DeskAPI.isUnlocked && DeskAPI.isUnlocked())) return;
+    ptr.busy = true;
+    $ptr.style.transform = "";
+    showPtr("Uppdaterar...", { spin: true });
+    try {
+      if (typeof DeskAPI.refreshSnap === "function") await DeskAPI.refreshSnap();
+      else if (typeof DeskAPI.loadSnap === "function") await DeskAPI.loadSnap();
+      const [desk, live, act] = await Promise.all([
+        DeskAPI.getState().catch(() => null),
+        DeskAPI.getLive ? DeskAPI.getLive().catch(() => null) : null,
+        DeskAPI.getActivity({ kind: state.activityFilter }).catch(() => null)
+      ]);
+      if (desk) state.desk = desk;
+      if (live) state.live = live;
+      if (act) state.activity = act;
+      await loadFun();
+      render({ keepScroll: true });
+      hidePtr();
+    } catch (e) {
+      const code = e && (e.code || e.name);
+      if (code === "decrypt_failed" || code === "bad_passcode" || code === "OperationError") {
+        hidePtr();
+        state.lockError = "Något gick fel när appen skulle öppnas. Logga in igen och försök på nytt.";
+        render({ keepScroll: false });
+        return;
+      }
+      showPtr("Kunde inte uppdatera", { spin: false, error: true });
+      ptr.hideTimer = setTimeout(() => { hidePtr(); }, 2200);
+    } finally {
+      ptr.busy = false;
+    }
+  }
+
   function render(opts) {
     const keep = !(opts && opts.keepScroll === false);
     const snap = keep ? captureScroll() : null;
@@ -1127,6 +1251,7 @@
       body = body.replace('<div class="page">', '<div class="page">' + freshnessBlock());
     }
     $app.innerHTML = `${body}${tabbar(tabFor(route))}${lightbox()}<div class="toast ${state.toast ? "show" : ""}" id="toast">${h(state.toast)}</div>`;
+    ensurePtr();
     if (snap) restoreScroll(snap);
     requestAnimationFrame(() => {
       afterPaint();
@@ -1439,6 +1564,11 @@
       Notification.requestPermission().then((p) => toast(p === "granted" ? "Notiser på" : "Tillåtelse nekad"));
     }
   });
+
+  document.addEventListener("touchstart", ptrOnStart, { passive: true });
+  document.addEventListener("touchmove", ptrOnMove, { passive: false });
+  document.addEventListener("touchend", ptrOnEnd);
+  document.addEventListener("touchcancel", ptrOnEnd);
 
   window.addEventListener("hashchange", () => {
     state.route = parseRoute();

@@ -306,13 +306,23 @@
     if (snapInflight) return snapInflight;
     snapInflight = (async () => {
       try {
-        const env = await fetchSnapEnv();
-        snapCache = await decryptWithKey(env, snapKey);
-        return snapCache;
-      } catch (e) {
-        // Salt rotation, stale key, or iOS OperationError — ask for the code again.
-        logout();
-        throw decryptFailed(e);
+        let env;
+        try {
+          env = await fetchSnapEnv();
+        } catch (e) {
+          const err = new Error("refresh_failed");
+          err.code = "refresh_failed";
+          if (e) err.cause = e;
+          throw err;
+        }
+        try {
+          snapCache = await decryptWithKey(env, snapKey);
+          return snapCache;
+        } catch (e) {
+          // Salt rotation, stale key, or iOS OperationError — ask for the code again.
+          logout();
+          throw decryptFailed(e);
+        }
       } finally {
         snapInflight = null;
       }
@@ -595,6 +605,8 @@
     logout,
     onHostedPages,
     snapGeneratedAt,
+    loadSnap,
+    refreshSnap: loadSnap,
 
     async getFun(period) {
       return liveGet("/api/fun?period=" + encodeURIComponent(period || "vecka"));
