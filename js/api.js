@@ -765,11 +765,11 @@
       return "Skulle ha stoppats" + (rest ? " (" + rest.trim() + ")" : "");
     });
     out = out.replace(/\bwould_have_stopped\b/ig, "Skulle ha stoppats");
-    out = out.replace(/^stop\s*-?\s*(\d+(?:[.,]\d+)?)\s*%$/i, function (_, n) { return "Stop-loss −" + n.replace(".", ",") + " %"; });
-    out = out.replace(/^time stop\s+(\d+)\s*h$/i, "Tidsstopp efter $1 h");
-    out = out.replace(/^take profit\s+\+?(\d+(?:[.,]\d+)?)\s*%$/i, function (_, n) { return "Take-profit +" + n.replace(".", ",") + " %"; });
-    out = out.replace(/^take profit\s+(\d+(?:[.,]\d+)?)\s*x$/i, function (_, n) { return "Take-profit " + n.replace(".", ",") + "×"; });
-    out = out.replace(/^trail\s+(\d+(?:[.,]\d+)?)\s*%$/i, function (_, n) { return "Trailing stop " + n.replace(".", ",") + " %"; });
+    out = out.replace(/\bstop\s*-?\s*(\d+(?:[.,]\d+)?)\s*%/ig, function (_, n) { return "Stop-loss −" + n.replace(".", ",") + " %"; });
+    out = out.replace(/\btime stop\s+(\d+)\s*h\b/ig, "Tidsstopp efter $1 h");
+    out = out.replace(/\btake profit\s+\+?(\d+(?:[.,]\d+)?)\s*%/ig, function (_, n) { return "Take-profit +" + n.replace(".", ",") + " %"; });
+    out = out.replace(/\btake profit\s+(\d+(?:[.,]\d+)?)\s*x\b/ig, function (_, n) { return "Take-profit " + n.replace(".", ",") + "×"; });
+    out = out.replace(/\btrail\s+(\d+(?:[.,]\d+)?)\s*%/ig, function (_, n) { return "Trailing stop " + n.replace(".", ",") + " %"; });
     out = out.replace(/^owner resumed\s+(.+?)\s+buy$/i, function (_, sym) { return "Du återupptog köpet av " + sym.trim(); });
     out = out.replace(/\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g, function (tok) {
       const words = {
