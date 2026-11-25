@@ -35,9 +35,14 @@
 
   function week(w) {
     if (!w || (!w.best && !w.worst)) return `<div class="card fun-card"><div class="card-h">Veckans bästa och sämsta trade</div><div class="muted small">Inga stängda affärer den här veckan än.</div></div>`;
-    const one = (x, lab) => x ? `<a class="row" href="#/coin/${encodeURIComponent(x.mint)}" data-nav="#/coin/${encodeURIComponent(x.mint)}">
-      <div class="row-body"><div class="row-title">${lab} ${h(x.symbol)}</div><div class="row-sub">${h(x.reason || "")}</div></div>
-      <div class="row-meta"><div class="chg ${cls(x.pnl_usd)} nums">${h(sUsd(x.pnl_usd))}</div><div class="tiny">${h(pct(x.pnl_pct))}</div></div></a>` : "";
+    const one = (x, lab) => {
+      if (!x) return "";
+      const L = window.DeskAPI && DeskAPI.assetLink && DeskAPI.assetLink(x);
+      const inner = `<div class="row-body"><div class="row-title">${lab} ${h(x.symbol)}</div><div class="row-sub">${h(x.reason || "")}</div></div>
+        <div class="row-meta"><div class="chg ${cls(x.pnl_usd)} nums">${h(sUsd(x.pnl_usd))}</div><div class="tiny">${h(pct(x.pnl_pct))}</div></div>`;
+      if (L && L.url) return `<a class="row" href="${h(L.url)}" target="_blank" rel="noopener">${inner}</a>`;
+      return `<div class="row">${inner}<div class="row-meta muted small">Ingen data än</div></div>`;
+    };
     return `<div class="card fun-card"><div class="card-h">Veckans bästa och sämsta trade</div>${one(w.best, "🏆")}${one(w.worst, "📉")}</div>`;
   }
 
@@ -126,7 +131,7 @@
         <div class="row-title">${h(r.from_meme)}/${h(r.from_majors)} → ${h(r.to_meme)}/${h(r.to_majors)} ${r.kind === "undo" ? "↩️" : "🔄"}</div>
         <div class="row-sub">${h(r.reason)} · ${h(String(r.ts).slice(0, 10))}${r.undone_at ? " · ångrad" : ""}</div></div>
         ${i === 0 && r.kind === "auto" && !r.undone_at ? `<button class="btn btn-small" data-lane-undo="${h(r.id)}">Ångra</button>` : ""}</div>`).join("");
-    return `<div class="card-h group-h">Fördelning</div><div class="card">${rows || `<div class="row"><div class="row-body"><div class="row-sub">Botarna har inte flyttat några pengar mellan spåren än. De gör det själva om memecoins går svagt (eller starkt) flera dagar i rad – max 10 procentenheter åt gången, högst var tredje dag.</div></div></div>`}</div>`;
+    return `<div class="card-h group-h">Fördelning</div><div class="card">${rows || `<div class="row"><div class="row-body"><div class="row-sub">Botarna har inte flyttat några pengar mellan spåren än. De gör det själva när det behövs – högst 15 procentenheter åt gången, och bara en gång per dygn.</div></div></div>`}</div>`;
   }
 
   // ---- effects ----

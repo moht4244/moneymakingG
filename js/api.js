@@ -105,10 +105,21 @@
   }
 
   function b64ToBytes(s) {
-    const bin = atob(s);
+    const clean = String(s || "").replace(/\s+/g, "");
+    const bin = atob(clean);
     const out = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
     return out;
+  }
+
+  function bytesToB64(buf) {
+    const arr = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+    let s = "";
+    const step = 0x8000;
+    for (let i = 0; i < arr.length; i += step) {
+      s += String.fromCharCode.apply(null, arr.subarray(i, i + step));
+    }
+    return btoa(s);
   }
 
   async function fetchSnapEnv() {
@@ -128,15 +139,19 @@
   }
 
   async function snapDeriveKey(secret, saltB64, iter) {
+    // iOS Safari is picky: prefer deriveBits + raw import over deriveKey, and SHA-256 as a Hash object.
     const enc = new TextEncoder();
-    const base = await crypto.subtle.importKey("raw", enc.encode(secret), "PBKDF2", false, ["deriveKey"]);
-    return crypto.subtle.deriveKey(
-      { name: "PBKDF2", hash: "SHA-256", salt: b64ToBytes(saltB64), iterations: iter || 800000 },
-      base,
-      { name: "AES-GCM", length: 256 },
-      true,
-      ["decrypt"]
-    );
+    const salt = b64ToBytes(saltB64);
+    const rounds = Math.max(1, Number(iter) || 800000);
+    const params = { name: "PBKDF2", hash: { name: "SHA-256" }, salt, iterations: rounds };
+    try {
+      const base = await crypto.subtle.importKey("raw", enc.encode(secret), "PBKDF2", false, ["deriveBits"]);
+      const bits = await crypto.subtle.deriveBits(params, base, 256);
+      return crypto.subtle.importKey("raw", bits, { name: "AES-GCM" }, true, ["decrypt"]);
+    } catch (_) {
+      const base = await crypto.subtle.importKey("raw", enc.encode(secret), "PBKDF2", false, ["deriveKey"]);
+      return crypto.subtle.deriveKey(params, base, { name: "AES-GCM", length: 256 }, true, ["decrypt"]);
+    }
   }
 
   async function decryptWithKey(env, key) {
@@ -158,8 +173,10 @@
     unlocked = true;
     try {
       if (remember) {
-        const jwk = await crypto.subtle.exportKey("jwk", key);
-        localStorage.setItem(REMEMBER_KEY, JSON.stringify({ v: 2, kdf: "PBKDF2", iter: env.iter, salt: env.salt, key: jwk }));
+        const raw = await crypto.subtle.exportKey("raw", key);
+        localStorage.setItem(REMEMBER_KEY, JSON.stringify({
+          v: 2, kdf: "PBKDF2", iter: env.iter, salt: env.salt, raw: bytesToB64(raw)
+        }));
       } else {
         localStorage.removeItem(REMEMBER_KEY);
       }
@@ -168,17 +185,31 @@
     return snapCache;
   }
 
+  async function importStoredKey(stored) {
+    if (stored && stored.raw) {
+      return crypto.subtle.importKey("raw", b64ToBytes(stored.raw), { name: "AES-GCM" }, true, ["decrypt"]);
+    }
+    if (stored && stored.key) {
+      // leftover JWK from an older build — try, then fall back to asking for the code
+      return crypto.subtle.importKey("jwk", stored.key, { name: "AES-GCM" }, true, ["decrypt"]);
+    }
+    throw new Error("no stored key");
+  }
+
   async function tryRememberedUnlock() {
+    if (onHostedPages()) {
+      try { localStorage.removeItem(TOKEN_KEY); } catch (_) {}
+    }
     let stored = null;
     try { stored = JSON.parse(localStorage.getItem(REMEMBER_KEY) || ""); } catch (_) { stored = null; }
-    if (!stored || !stored.key) return false;
+    if (!stored || (!stored.raw && !stored.key)) return false;
     try {
       const env = await fetchSnapEnv();
       if (stored.salt !== env.salt || Number(stored.iter) !== Number(env.iter)) {
         localStorage.removeItem(REMEMBER_KEY);
         return false;
       }
-      const key = await crypto.subtle.importKey("jwk", stored.key, { name: "AES-GCM" }, true, ["decrypt"]);
+      const key = await importStoredKey(stored);
       snapCache = await decryptWithKey(env, key);
       snapKey = key;
       unlocked = true;
@@ -186,6 +217,9 @@
       return true;
     } catch (_) {
       try { localStorage.removeItem(REMEMBER_KEY); } catch (__) {}
+      unlocked = false;
+      snapKey = null;
+      snapCache = null;
       return false;
     }
   }
@@ -195,6 +229,16 @@
     snapKey = null;
     snapCache = null;
     try { localStorage.removeItem(REMEMBER_KEY); } catch (_) {}
+    if (onHostedPages()) {
+      try { localStorage.removeItem(TOKEN_KEY); } catch (_) {}
+    }
+  }
+
+  function decryptFailed(cause) {
+    const err = new Error("decrypt_failed");
+    err.code = "decrypt_failed";
+    if (cause) err.cause = cause;
+    return err;
   }
 
   async function loadSnap() {
@@ -206,9 +250,9 @@
         snapCache = await decryptWithKey(env, snapKey);
         return snapCache;
       } catch (e) {
-        // Salt rotation or a bad stored key — ask for the code again.
+        // Salt rotation, stale key, or iOS OperationError — ask for the code again.
         logout();
-        throw e;
+        throw decryptFailed(e);
       } finally {
         snapInflight = null;
       }
@@ -232,7 +276,13 @@
     if (u === "/api/fun" || u === "api/fun") return s.fun || {};
     if (u === "/api/ticker" || u === "api/ticker") return s.ticker || { items: [] };
     if (u === "/api/lanes" || u === "api/lanes") return s.lanes || {};
-    if (u === "/api/activity" || u === "api/activity") return s.activity || { items: [] };
+    if (u === "/api/activity" || u === "api/activity") {
+      const all = s.activity || { items: [] };
+      const kind = q.kind;
+      if (!kind || kind === "all") return all;
+      const items = (all.items || []).filter((it) => activityKindMatch(it.kind, kind));
+      return { items, next: all.next || null };
+    }
     if (u === "/api/chart" || u === "api/chart") {
       const r = q.range || "today";
       return (s.charts && (s.charts[r] || s.charts.today)) || { range: r, points: [] };
@@ -257,6 +307,177 @@
     if (u === "/api/leverage" || u === "api/leverage") return s.leverage || (s.state && s.state.leverage) || {};
     if (u === "/api/risk" || u === "api/risk") return s.risk || (s.state && s.state.risk) || {};
     if (u === "/api/graduation" || u === "api/graduation") return s.graduation || (s.state && s.state.graduation) || {};
+    if (u === "/api/live" || u === "api/live") return s.live || s.activity || { items: [] };
+    const coinM = u.match(/^(?:\/)?api\/coin\/(.+)$/);
+    if (coinM) return coinFromSnap(decodeURIComponent(coinM[1]));
+    const auditM = u.match(/^(?:\/)?api\/audit\/(.+)$/);
+    if (auditM) return auditFromSnap(decodeURIComponent(auditM[1]));
+    return null;
+  }
+
+  function activityKindMatch(kind, filter) {
+    const k = String(kind || "").toLowerCase();
+    if (filter === "trades") return k === "buy" || k === "sell" || k === "bought" || k === "sold";
+    if (filter === "blocks") return k === "block" || k === "stop" || k === "stopped" || k === "rejected" || k === "guard";
+    if (filter === "lessons") return k === "lesson" || k === "lessons";
+    return true;
+  }
+
+  function snapFindAsset(id) {
+    const s = snapCache || {};
+    const st = s.state || {};
+    const hits = [];
+    for (const p of (st.positions || [])) hits.push(p);
+    const movers = s.movers || {};
+    for (const k of Object.keys(movers)) {
+      for (const it of (movers[k] && movers[k].items) || []) hits.push(it);
+    }
+    for (const it of ((s.activity || {}).items || [])) hits.push(it);
+    for (const it of ((s.live || {}).items || [])) hits.push(it);
+    for (const it of (st.watching || [])) hits.push(it);
+    const uni = (s.assets && s.assets.universe) || [];
+    for (const it of uni) hits.push(it);
+    const perps = (s.assets && s.assets.perps) || [];
+    for (const it of perps) hits.push(Object.assign({ mint: it.market || it.symbol }, it));
+    const dec = s.decisions || {};
+    for (const name of Object.keys(dec)) {
+      for (const it of dec[name] || []) hits.push(it);
+    }
+    const fun = s.fun || {};
+    for (const key of ["best", "worst"]) {
+      const w = fun.week && fun.week[key];
+      if (w) hits.push(w);
+    }
+    return hits.find((x) => x && (x.mint === id || x.market === id || x.symbol === id)) || null;
+  }
+
+  function coinFromSnap(id) {
+    const s = snapCache || {};
+    const st = s.state || {};
+    const pos = (st.positions || []).find((p) => p.mint === id) || null;
+    const found = snapFindAsset(id);
+    const symbol = (pos && pos.symbol) || (found && found.symbol) || null;
+    const name = (pos && pos.name) || (found && found.name) || symbol;
+    const lane = (pos && pos.lane) || (found && found.lane) || (found && found.category) || null;
+    const price = (pos && (pos.mark_usd || pos.price_usd)) || (found && (found.price || found.price_usd || found.mark_usd)) || null;
+    const change = found && (found.change_pct != null ? found.change_pct : found.change_24h);
+    const empty = !pos && !found && !symbol;
+    const links = assetLink({ mint: id, symbol, lane, category: found && found.category, venue: found && found.venue });
+    return {
+      mint: id, symbol: symbol || null, name: name || null, lane,
+      price_usd: price, change_1h: found && found.change_1h, change_24h: change,
+      mc_usd: found && found.mc_usd, liq_usd: found && found.liq_usd,
+      volume_24h: found && found.volume_24h, holders: found && found.holders,
+      age_min: found && found.age_min, thesis: found && (found.thesis || found.reason) || null,
+      score: found && found.score, decision: found && found.decision, chart: [],
+      position: pos, links: links ? { open: links.url, label: links.label, button: links.button } : {},
+      empty: !!empty
+    };
+  }
+
+  function auditFromSnap(id) {
+    const coin = coinFromSnap(id);
+    return {
+      mint: id, symbol: coin.symbol, name: coin.name, grade: null, notes: null,
+      layers: [], passed: false, empty: true,
+      links: coin.links || {}
+    };
+  }
+
+
+  function isSolanaMint(v) {
+    const s = String(v || "");
+    return s.length >= 32 && s.length <= 44 && /^[1-9A-HJ-NP-Za-km-z]+$/.test(s);
+  }
+
+  const TV_PERP = {
+    GOLD: "XAUUSD", SILVER: "XAGUSD", BRENTOIL: "UKOIL", CL: "USOIL",
+    COPPER: "COPPER", NATGAS: "NATGAS", PLATINUM: "XPTUSD", PALLADIUM: "XPDUSD",
+    HO: "HO1!", EUR: "EURUSD", USDJPY: "USDJPY", GBP: "GBPUSD", GBPUSD: "GBPUSD",
+    XYZ100: "NAS100", SP500: "SPX", KR200: "KOSPI200", JP225: "JPN225",
+    NIFTY: "NIFTY", SPCX: "SPX",
+    EWY: "AMEX-EWY", EWJ: "AMEX-EWJ", URNM: "AMEX-URNM", TLT: "NASDAQ-TLT",
+    EWZ: "AMEX-EWZ", EWT: "AMEX-EWT", SMH: "NASDAQ-SMH", XLE: "AMEX-XLE", SOXL: "AMEX-SOXL"
+  };
+  const TV_CRYPTO = {
+    BTC: "BTCUSD", ETH: "ETHUSD", SOL: "SOLUSD", DOGE: "DOGEUSD", XRP: "XRPUSD",
+    ADA: "ADAUSD", AVAX: "AVAXUSD", LINK: "LINKUSD", DOT: "DOTUSD", LTC: "LTCUSD",
+    BNB: "BNBUSD", SUI: "SUIUSD", WBTC: "BTCUSD", WETH: "ETHUSD"
+  };
+  const TV_STOCK = {
+    AAPL: "NASDAQ-AAPL", MSFT: "NASDAQ-MSFT", NVDA: "NASDAQ-NVDA", TSLA: "NASDAQ-TSLA",
+    AMZN: "NASDAQ-AMZN", GOOG: "NASDAQ-GOOG", GOOGL: "NASDAQ-GOOGL", META: "NASDAQ-META",
+    NFLX: "NASDAQ-NFLX", AMD: "NASDAQ-AMD", INTC: "NASDAQ-INTC", AVGO: "NASDAQ-AVGO",
+    COST: "NASDAQ-COST", ADBE: "NASDAQ-ADBE", PEP: "NASDAQ-PEP", CSCO: "NASDAQ-CSCO",
+    QCOM: "NASDAQ-QCOM", TXN: "NASDAQ-TXN", AMAT: "NASDAQ-AMAT", INTU: "NASDAQ-INTU",
+    AMGN: "NASDAQ-AMGN", HON: "NASDAQ-HON", SBUX: "NASDAQ-SBUX", BKNG: "NASDAQ-BKNG",
+    ADP: "NASDAQ-ADP", ISRG: "NASDAQ-ISRG", GILD: "NASDAQ-GILD", MU: "NASDAQ-MU",
+    LRCX: "NASDAQ-LRCX", PANW: "NASDAQ-PANW", KLAC: "NASDAQ-KLAC", CRWD: "NASDAQ-CRWD",
+    JPM: "NYSE-JPM", V: "NYSE-V", MA: "NYSE-MA", UNH: "NYSE-UNH", JNJ: "NYSE-JNJ",
+    WMT: "NYSE-WMT", PG: "NYSE-PG", XOM: "NYSE-XOM", HD: "NYSE-HD", BAC: "NYSE-BAC",
+    KO: "NYSE-KO", DIS: "NYSE-DIS", VZ: "NYSE-VZ", NKE: "NYSE-NKE", MRK: "NYSE-MRK",
+    CVX: "NYSE-CVX", ABBV: "NYSE-ABBV", ORCL: "NYSE-ORCL", IBM: "NYSE-IBM", GE: "NYSE-GE",
+    CAT: "NYSE-CAT", GS: "NYSE-GS", MCD: "NYSE-MCD", BA: "NYSE-BA", RTX: "NYSE-RTX"
+  };
+  const PERP_SET = new Set(Object.keys(TV_PERP));
+  const CRYPTO_SET = new Set(Object.keys(TV_CRYPTO));
+  const STOCK_CAT = new Set(["equity", "stock", "stocks", "gold_miners"]);
+  const PERP_CAT = new Set(["gold", "silver", "platinum", "palladium", "oil", "commodity", "commodities", "fx", "index", "etf", "indices"]);
+
+  function tickerOf(item) {
+    const raw = String((item && (item.symbol || item.market || (!isSolanaMint(item && item.mint) && item.mint))) || "").trim();
+    return raw.replace(/[-\/]?(PERP|USD)?$/i, "").toUpperCase();
+  }
+
+  function isWalletAddress(v) {
+    const s = String(v || "");
+    if (!isSolanaMint(s)) return false;
+    try {
+      const w = (snapCache && snapCache.state && snapCache.state.wallet && snapCache.state.wallet.address) || "";
+      if (w && s === w) return true;
+      // masked snapshot wallets look like Abcd…Wxyz — never treat those as mints
+      if (w && w.indexOf("…") >= 0) {
+        const [a, b] = w.split("…");
+        if (a && b && s.startsWith(a) && s.endsWith(b)) return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  function tvUrl(sym) {
+    const s = String(sym || "").replace(/^\//, "");
+    if (!s) return "";
+    return "https://www.tradingview.com/symbols/" + encodeURIComponent(s) + "/";
+  }
+
+  function assetLink(item) {
+    item = item || {};
+    const mint = item.mint || item.address || "";
+    const cat = String(item.category || item.lane || "").toLowerCase();
+    const venue = String(item.venue || "").toLowerCase();
+    const tick = tickerOf(item);
+    if (mint && isSolanaMint(mint) && !isWalletAddress(mint)) {
+      return {
+        url: "https://dexscreener.com/solana/" + mint,
+        label: "DexScreener",
+        button: "Öppna på DexScreener",
+        kind: "dexscreener"
+      };
+    }
+    if (tick && (PERP_SET.has(tick) || PERP_CAT.has(cat) || venue === "hyperliquid")) {
+      const mapped = TV_PERP[tick] || tick;
+      return { url: tvUrl(mapped), label: "TradingView", button: "Öppna på TradingView", kind: "tradingview" };
+    }
+    if (tick && (TV_STOCK[tick] || STOCK_CAT.has(cat))) {
+      const mapped = TV_STOCK[tick] || ("NASDAQ-" + tick);
+      return { url: tvUrl(mapped), label: "TradingView", button: "Öppna på TradingView", kind: "tradingview" };
+    }
+    if (tick && CRYPTO_SET.has(tick)) {
+      return { url: tvUrl(TV_CRYPTO[tick]), label: "TradingView", button: "Öppna på TradingView", kind: "tradingview" };
+    }
+    if (tick && /^[A-Z0-9.]{1,12}$/.test(tick) && !isSolanaMint(tick)) {
+      return { url: tvUrl(tick), label: "TradingView", button: "Öppna på TradingView", kind: "tradingview" };
+    }
     return null;
   }
 
@@ -266,7 +487,11 @@
       if (!snapCache) await loadSnap();
       const hit = fromSnap(path);
       if (hit != null) return hit;
-      if (onHostedPages()) throw new Error("HTTP 404");
+      if (onHostedPages()) {
+        const err = new Error("HTTP 404");
+        err.status = 404;
+        throw err;
+      }
     } else if (onHostedPages()) {
       const err = new Error("HTTP 401");
       err.status = 401;
@@ -346,15 +571,29 @@
     },
 
     screenUrl() {
+      if (onHostedPages()) return "";
       const t = getToken();
       return apiUrl("/api/screen.jpg") + (t ? "?token=" + encodeURIComponent(t) : "") + "&_=" + Date.now();
     },
 
+    async getLive() {
+      return liveGet("/api/live");
+    },
+
+    assetLink,
+
     openStream(handlers) {
-      if (isUnlocked()) {
+      if (isUnlocked() || onHostedPages()) {
+        if (!isUnlocked()) return { close() {} };
         startSnapRefresh();
         const id = setInterval(() => {
-          loadSnap().then((s) => { if (s && handlers.state) handlers.state(s.state); if (s && handlers.tick) handlers.tick({ ts: Date.now() }); }).catch(() => {});
+          loadSnap().then((s) => {
+            if (!s) return;
+            if (handlers.state) handlers.state(s.state);
+            if (handlers.activity && s.activity) handlers.activity(s.activity);
+            if (handlers.live && (s.live || s.activity)) handlers.live(s.live || s.activity);
+            if (handlers.tick) handlers.tick({ ts: Date.now() });
+          }).catch(() => {});
         }, 60000);
         return { close() { clearInterval(id); } };
       }

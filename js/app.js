@@ -43,6 +43,7 @@
     movers: null,
     chart: null,
     activity: null,
+    live: null,
     activityFilter: "all",
     laneFilter: "all",
     coin: null,
@@ -66,6 +67,7 @@
     if (a === "coin" && parts[1]) return { name: "coin", mint: decodeURIComponent(parts[1]) };
     if (a === "audit" && parts[1]) return { name: "audit", mint: decodeURIComponent(parts[1]) };
     if (a === "chat") return { name: "chat", bot: parts[1] ? decodeURIComponent(parts[1]) : null };
+    if (a === "regler" || a === "rules") return { name: "regler" };
     return { name: "home" };
   }
 
@@ -146,17 +148,35 @@
     </div>`;
   }
 
+  function parseTs(ts) {
+    if (ts == null || ts === "") return null;
+    if (typeof ts === "number" && isFinite(ts)) return new Date(ts < 1e12 ? ts * 1000 : ts);
+    const d = new Date(ts);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  function sthlmStamp(ts) {
+    const d = parseTs(ts);
+    if (!d) return "";
+    const optsDate = { timeZone: "Europe/Stockholm", timeZoneName: undefined };
+    const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Stockholm" });
+    const day = d.toLocaleDateString("sv-SE", { timeZone: "Europe/Stockholm" });
+    if (day === today) return d.toLocaleTimeString("sv-SE", { timeZone: "Europe/Stockholm", hour: "2-digit", minute: "2-digit" });
+    return d.toLocaleString("sv-SE", { timeZone: "Europe/Stockholm", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  }
+
   function relTime(ts) {
-    if (!ts) return "";
-    const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+    const when = parseTs(ts);
+    if (!when) return "";
+    const s = Math.max(0, Math.round((Date.now() - when.getTime()) / 1000));
     if (s < 10) return "nyss";
     if (s < 60) return s + " s sedan";
     const m = Math.round(s / 60);
     if (m < 60) return m + " min sedan";
     const hr = Math.round(m / 60);
     if (hr < 24) return hr + " h sedan";
-    const d = Math.round(hr / 24);
-    return d + " d sedan";
+    const days = Math.round(hr / 24);
+    return days + " d sedan";
   }
 
   function shortAddr(a) {
@@ -273,13 +293,38 @@
     </div></div>`;
   }
 
+  function swedishLoadError(err) {
+    const status = err && err.status;
+    const code = err && (err.code || err.name);
+    const raw = String((err && err.message) || err || "");
+    if (status === 404) return "Inget hittades för den här skärmen.";
+    if (status === 401 || code === "bad_passcode" || code === "decrypt_failed" || code === "OperationError") {
+      return "Något gick fel när appen skulle öppnas. Logga in igen och försök på nytt.";
+    }
+    if (!raw) return "Något gick fel när appen skulle öppnas. Logga in igen och försök på nytt.";
+    // Never show raw English browser errors (e.g. WebCrypto OperationError).
+    if (/operation failed|OperationError|TypeError|not allowed|undefined|HTTP\s|failed for an operation/i.test(raw)
+        || (/^[A-Za-z0-9 .,'’\-():]+$/.test(raw) && !/[åäöÅÄÖ]/.test(raw) && !/Inget hittades|Något gick fel|Fel kod/.test(raw))) {
+      return "Något gick fel när appen skulle öppnas. Logga in igen och försök på nytt.";
+    }
+    return raw;
+  }
+
+  function isUnlockError(err) {
+    const code = err && (err.code || err.name);
+    const raw = String((err && err.message) || "");
+    return (err && err.status === 401) || code === "bad_passcode" || code === "decrypt_failed" || code === "OperationError"
+      || /operation failed|OperationError|decrypt/i.test(raw);
+  }
+
   function errorView(msg, back) {
+    const safe = swedishLoadError(msg);
     return `${topbar({ title: APP_NAME, back: back || null, backLabel: "Tillbaka" })}
       <div class="screen"><div class="state">
         <div class="ico">⚠️</div>
         <h3>Kunde inte ladda</h3>
-        <p>${h(msg || "Moneymaking G svarade inte.")}</p>
-        <button class="btn btn-primary" data-action="retry" style="margin-top:20px">Försök igen</button>
+        <p>${h(safe || "Något gick fel när appen skulle öppnas. Logga in igen och försök på nytt.")}</p>
+        <button class="btn btn-primary" data-action="login-again" style="margin-top:20px">Logga in igen</button>
       </div></div>`;
   }
 
@@ -370,14 +415,33 @@
 
   const MOVERS_RANGE_SV = { today: "idag", "7d": "på 7 dagar", "30d": "på 30 dagar", month: "denna månad", year: "i år", start: "sedan start" };
 
+  function assetLinkOf(item) {
+    return (window.DeskAPI && DeskAPI.assetLink) ? DeskAPI.assetLink(item) : null;
+  }
+
+  function assetRow(item, inner, extraClass, extraAttr) {
+    const cls = extraClass || "row";
+    const attr = extraAttr ? " " + extraAttr : "";
+    const link = assetLinkOf(item);
+    if (link && link.url) {
+      return `<a class="${cls}" href="${h(link.url)}" target="_blank" rel="noopener"${attr}>${inner}</a>`;
+    }
+    return `<div class="${cls}"${attr}>${inner}<div class="row-meta muted small">Ingen data än</div></div>`;
+  }
+
+  function openMarketBtn(item) {
+    const link = assetLinkOf(item);
+    if (!link || !link.url) return "";
+    return `<a class="btn btn-primary" href="${h(link.url)}" target="_blank" rel="noopener">${h(link.button || ("Öppna på " + link.label))}</a>`;
+  }
+
   function moversCard() {
     const side = state.moversSide === "worst" ? "worst" : "best";
     const raw = ((state.movers && state.movers.items) || []).filter((x) => x && x.change_pct != null);
     const items = (side === "worst" ? raw.slice().sort((a, b) => a.change_pct - b.change_pct) : raw.slice().sort((a, b) => b.change_pct - a.change_pct)).slice(0, 4);
     const rng = (state.movers && state.movers.range) || state.chartRange || "today";
     const lab = MOVERS_RANGE_SV[rng] || "perioden";
-    const rows = items.length ? items.map((c) => `
-      <a class="row has-avatar" href="#/coin/${encodeURIComponent(c.mint)}" data-nav="#/coin/${encodeURIComponent(c.mint)}">
+    const rows = items.length ? items.map((c) => assetRow(c, `
         <div class="row-body">
           <div class="row-title">${h(c.symbol)}${c.held ? " 💼" : ""}</div>
           <div class="row-sub nums">${h(fmtUsd(c.price, { exact: true }))} · ${h(lab)}</div>
@@ -385,8 +449,7 @@
         <div class="row-meta">
           <div class="chg ${chgClass(c.change_pct)} nums">${h(fmtPct(c.change_pct))}</div>
         </div>
-        ${svg("chev")}
-      </a>`).join("") : `<div class="state" style="padding:20px 16px"><p>Inga coins att jämföra för den här perioden än.</p></div>`;
+        ${assetLinkOf(c) ? svg("chev") : ""}`, "row has-avatar")).join("") : `<div class="state" style="padding:20px 16px"><p>Inga coins att jämföra för den här perioden än.</p></div>`;
     return `<div class="card" id="movers-card">
       <div class="card-h">Topp 4 coins
         <div class="segments" data-role="movers-side">
@@ -540,8 +603,7 @@
 
       <div class="card">
         <div class="card-h">Öppna positioner</div>
-        ${positions.length ? positions.map((p, i) => `
-          <a class="row has-avatar" href="#/coin/${encodeURIComponent(p.mint)}" data-nav="#/coin/${encodeURIComponent(p.mint)}" style="${i === 0 ? "padding-top:14px" : ""}">
+        ${positions.length ? positions.map((p, i) => assetRow(p, `
             ${tokenAvatar(p.symbol, p.mint)}
             <div class="row-body">
               <div class="row-title">${h(p.symbol)}${laneChip(laneOf(p))}</div>
@@ -551,23 +613,20 @@
               <div class="chg ${chgClass(p.pnl_usd)} nums">${h(fmtPct(p.pnl_pct))}</div>
               <div class="tiny nums">${p.pnl_usd >= 0 ? "+" : ""}${h(fmtUsd(p.pnl_usd, { exact: true }))}</div>
             </div>
-            ${svg("chev")}
-          </a>`).join("") : `<div class="state" style="padding:28px 16px"><p>Inga öppna positioner.</p></div>`}
+            ${assetLinkOf(p) ? svg("chev") : ""}`, "row has-avatar", i === 0 ? 'style="padding-top:14px"' : "")).join("") : `<div class="state" style="padding:28px 16px"><p>Inga öppna positioner.</p></div>`}
       </div>
 
       ${window.DeskFun && state.fun ? DeskFun.week(state.fun.week) + DeskFun.meme(state.fun.meme) + DeskFun.chat(state.fun.chat, 8) : ""}
       ${watching.length ? `<div class="card">
         <div class="card-h">Bevakas</div>
-        ${watching.map((w) => `
-          <a class="row has-avatar" href="#/coin/${encodeURIComponent(w.mint)}" data-nav="#/coin/${encodeURIComponent(w.mint)}">
+        ${watching.map((w) => assetRow(w, `
             ${tokenAvatar(w.symbol, w.mint)}
             <div class="row-body">
               <div class="row-title">${h(w.symbol)}${laneChip(laneOf(w))}</div>
               <div class="row-sub">${h(w.reason || w.name || "")}</div>
             </div>
             <div class="row-meta"><div class="tiny">Score ${h(w.score)}</div></div>
-            ${svg("chev")}
-          </a>`).join("")}
+            ${assetLinkOf(w) ? svg("chev") : ""}`, "row has-avatar")).join("")}
       </div>` : ""}
 
       ${picks.length ? `<div class="card">
@@ -581,11 +640,7 @@
           </div>`).join("")}
       </div>` : ""}
 
-      <div class="card screen-card" data-action="lightbox">
-        <div class="card-h">Live-skärm</div>
-        <img id="desk-screen" alt="Live-skärm" src="${h(DeskAPI.screenUrl())}">
-        <div class="caption">${d.last_action ? h(d.last_action.text) + " · " + h(relTime(d.last_action.ts)) : "Tryck för att förstora"}</div>
-      </div>
+      ${liveFeedCard()}
     </div></div>`;
   }
 
@@ -595,9 +650,15 @@
     const c = state.coin;
     if (!c) return errorView("Coinet hittades inte.", "#/home");
     const mint = c.mint;
-    const dex = (c.links && c.links.dexscreener) || ("https://dexscreener.com/solana/" + mint);
     const pos = c.position;
-    return `${topbar({ title: c.symbol, back: "#/home", backLabel: "Hem", right: pillPaperOrLive(state.desk && state.desk.mode) })}
+    if (c.empty && !pos) {
+      return `${topbar({ title: c.symbol || "Coin", back: "#/home", backLabel: "Hem", right: pillPaperOrLive(state.desk && state.desk.mode) })}
+      <div class="screen"><div class="page">
+        ${emptyView("Ingen data än", "Det finns ingen detalj för den här coinen i senaste uppdateringen.")}
+        ${openMarketBtn(c)}
+      </div></div>`;
+    }
+    return `${topbar({ title: c.symbol || "Coin", back: "#/home", backLabel: "Hem", right: pillPaperOrLive(state.desk && state.desk.mode) })}
     <div class="screen"><div class="page">
       <div class="coin-head">
         ${tokenAvatar(c.symbol, c.mint)}
@@ -630,11 +691,11 @@
 
       ${c.thesis ? `<div class="card thesis"><div class="who">Brain · varför</div><p>${h(c.thesis)}</p></div>` : ""}
 
-      <a class="btn btn-primary" href="${h(dex)}" target="_blank" rel="noopener">Öppna på DexScreener</a>
-      <a class="row card" style="margin-top:4px" href="#/audit/${encodeURIComponent(mint)}" data-nav="#/audit/${encodeURIComponent(mint)}">
+      ${openMarketBtn(c)}
+      ${!c.empty && (c.layers || mint) ? `<a class="row card" style="margin-top:4px" href="#/audit/${encodeURIComponent(mint)}" data-nav="#/audit/${encodeURIComponent(mint)}">
         <div class="row-body"><div class="row-title">Visa säkerhetskoll</div><div class="row-sub">Rapport med 8 kontroller</div></div>
         ${svg("chev")}
-      </a>
+      </a>` : ""}
     </div></div>`;
   }
 
@@ -650,6 +711,13 @@
     if (state.error) return errorView(state.error, state.route.mint ? "#/coin/" + encodeURIComponent(state.route.mint) : "#/home");
     const a = state.audit;
     if (!a) return errorView("Säkerhetskollen hittades inte.", "#/home");
+    if (a.empty || !(a.layers || []).length) {
+      return `${topbar({ title: "Säkerhetskoll", back: a.mint ? "#/coin/" + encodeURIComponent(a.mint) : "#/home", backLabel: a.symbol || "Tillbaka" })}
+      <div class="screen"><div class="page">
+        ${emptyView("Ingen data än", "Säkerhetskollen för den här coinen finns inte i senaste uppdateringen.")}
+        ${openMarketBtn(a)}
+      </div></div>`;
+    }
     const back = "#/coin/" + encodeURIComponent(a.mint);
     const passed = (a.layers || []).filter((l) => l.pass).length;
     const total = (a.layers || []).length;
@@ -676,7 +744,7 @@
           </div>`;
         }).join("")}
       </div>
-      <a class="btn btn-dex" href="https://dexscreener.com/solana/${encodeURIComponent(a.mint)}" target="_blank" rel="noopener">Öppna på DexScreener</a>
+      ${openMarketBtn(a)}
     </div></div>`;
   }
 
@@ -738,11 +806,12 @@
       <div class="card">
         <div class="card-h">Beslut</div>
         ${dec.length ? dec.map((d) => `
-          <${d.mint ? `a href="#/coin/${encodeURIComponent(d.mint)}" data-nav="#/coin/${encodeURIComponent(d.mint)}"` : "div"} class="decision">
-            <div class="when">${h(relTime(d.ts))}${d.symbol ? " · " + h(d.symbol) : ""}</div>
+          ${(() => { const L = assetLinkOf(d); const tag = L && L.url ? "a" : "div"; const href = L && L.url ? ` href="${h(L.url)}" target="_blank" rel="noopener"` : ""; return `
+          <${tag} class="decision"${href}>
+            <div class="when">${h(sthlmStamp(d.ts) || relTime(d.ts))}${d.symbol ? " · " + h(d.symbol) : ""}</div>
             <div class="act">${h(d.action || "")}</div>
             <p>${h(d.reason || "")}</p>
-          </${d.mint ? "a" : "div"}>
+          </${tag}>`; })()}
         `).join("") : emptyView("Inga beslut än", "När boten gör något syns det här.")}
       </div>
     </div></div>`;
@@ -753,8 +822,9 @@
     if (state.error && !state.activity) return errorView(state.error);
     const items = ((state.activity && state.activity.items) || [])
       .filter((it) => matchesLane(it, state.laneFilter))
+      .filter((it) => activityFilterMatch(it.kind, state.activityFilter))
       .slice()
-      .sort((x, y) => (y.ts || 0) - (x.ts || 0));
+      .sort((x, y) => ((parseTs(y.ts) || 0) - (parseTs(x.ts) || 0)));
     const filters = [["all", "Alla"], ["trades", "Affärer"], ["blocks", "Stoppade"], ["lessons", "Lärdomar"]];
     return `${topbar({ title: "Händelser", right: pillPaperOrLive(state.desk && state.desk.mode) })}
     <div class="screen"><div class="page">
@@ -772,14 +842,153 @@
             <div class="row-sub">${h(it.body || "")}</div>
           </div>
           <div class="row-meta">
-            <div class="tiny">${h(relTime(it.ts))}</div>
-            ${it.pnl_usd != null && it.kind === "sell" ? `<div class="chg ${chgClass(it.pnl_usd)} nums">${h(fmtUsd(it.pnl_usd, { exact: true }))}</div>` : ""}
+            <div class="tiny">${h(sthlmStamp(it.ts) || relTime(it.ts))}</div>
+            ${it.pnl_usd != null && (it.kind === "sell" || it.kind === "stop") ? `<div class="chg ${chgClass(it.pnl_usd)} nums">${h(fmtUsd(it.pnl_usd, { exact: true }))}</div>` : ""}
           </div>
-          ${it.mint ? svg("chev") : ""}`;
-        return it.mint
-          ? `<a class="row" href="#/coin/${encodeURIComponent(it.mint)}" data-nav="#/coin/${encodeURIComponent(it.mint)}">${inner}</a>`
-          : `<div class="row">${inner}</div>`;
-      }).join("")}</div>` : emptyView("Inget här än", "Köp, sälj, stopp och lärdomar dyker upp här.")}
+          ${assetLinkOf(it) ? svg("chev") : ""}`;
+        return assetRow(it, inner);
+      }).join("")}</div>` : emptyView("Inga händelser än", "Köp, sälj, stopp och lärdomar dyker upp här.")}
+    </div></div>`;
+  }
+
+  function activityFilterMatch(kind, filter) {
+    const k = String(kind || "").toLowerCase();
+    if (!filter || filter === "all") return true;
+    if (filter === "trades") return k === "buy" || k === "sell" || k === "bought" || k === "sold";
+    if (filter === "blocks") return k === "block" || k === "stop" || k === "stopped" || k === "rejected" || k === "guard";
+    if (filter === "lessons") return k === "lesson" || k === "lessons";
+    return true;
+  }
+
+  const KIND_SV = { buy:"KÖP", sell:"SÄLJ", stop:"STOPP", block:"STOPP", rejected:"SKIP", lesson:"LÄRD",
+    scan:"SIGNAL", signal:"SIGNAL", risk:"RISK", research:"RES", whale:"WHALE", sentiment:"STÄMN",
+    guard:"VAKT", portfolio:"PORT", review:"REV", system:"INFO" };
+
+  function liveFeedCard() {
+    const raw = ((state.live && state.live.items) || (state.activity && state.activity.items) || []).slice();
+    raw.sort((a, b) => {
+      const ta = parseTs(a && a.ts), tb = parseTs(b && b.ts);
+      return (tb ? tb.getTime() : 0) - (ta ? ta.getTime() : 0);
+    });
+    const items = raw.slice(0, 20);
+    const rows = items.length ? items.map((it) => {
+      const kind = it.kind || "system";
+      const tag = KIND_SV[kind] || "INFO";
+      const inner = `
+        <div class="event-kind ${h(kind)}">${tag}</div>
+        <div class="row-body">
+          <div class="row-title">${h(it.title || it.symbol || "Händelse")}${laneChip(laneOf(it))}</div>
+          <div class="row-sub">${h(it.body || it.symbol || "")}</div>
+        </div>
+        <div class="row-meta">
+          <div class="tiny">${h(sthlmStamp(it.ts) || relTime(it.ts))}</div>
+          ${it.pnl_usd != null ? `<div class="chg ${chgClass(it.pnl_usd)} nums">${h(fmtUsd(it.pnl_usd, { exact: true }))}</div>` : ""}
+        </div>
+        ${assetLinkOf(it) ? svg("chev") : ""}`;
+      return assetRow(it, inner);
+    }).join("") : `<div class="state" style="padding:20px 16px"><p>Inga händelser än</p></div>`;
+    return `<div class="card" id="live-feed">
+      <div class="card-h">Live</div>
+      <p class="live-lead">Senaste köp, sälj och signaler från botarna. Uppdateras varje minut.</p>
+      ${rows}
+    </div>`;
+  }
+
+  function renderRegler() {
+    const d = state.desk || {};
+    const risk = d.risk || {};
+    const lev = d.leverage || {};
+    const grad = d.graduation || {};
+    const lanes = d.lanes || {};
+    const dailyLim = (risk.daily && risk.daily.limit_pct) || 5;
+    const weekLim = (risk.weekly && risk.weekly.limit_pct) || 10;
+    const ddLim = (risk.drawdown && risk.drawdown.limit_pct) || 20;
+    const tradePct = risk.effective_risk_per_trade_pct || risk.risk_per_trade_pct_cap || 3;
+    const split = {
+      memecoin: (lanes.memecoins && (lanes.memecoins.target_pct != null ? lanes.memecoins.target_pct : lanes.memecoins.pct)) ?? 50,
+      majors: (lanes.majors && (lanes.majors.target_pct != null ? lanes.majors.target_pct : lanes.majors.pct)) ?? 40,
+      reserve: (lanes.reserve && (lanes.reserve.target_pct != null ? lanes.reserve.target_pct : lanes.reserve.pct)) ?? 10
+    };
+    const mode = d.mode || "PAPER";
+    const levLocked = lev.locked !== false && !lev.unlocked;
+    const levCap = lev.allowed_leverage || (levLocked ? 1 : 3);
+    const critLabel = {
+      running_days: "Minst 90 dagar i gång",
+      net_pnl: "Plusresultat totalt",
+      max_drawdown: "Största backgång högst 20 %",
+      win_rate: "Minst 50 % vinnande affärer, minst 30 affärer",
+      no_guard_breaches: "Inga regelbrott senaste 30 dagarna",
+      trades: "Minst 30 affärer"
+    };
+    const gradLabel = {
+      running_days: "Minst 60 dagar i PAPER",
+      net_pnl: "Plusresultat i spåret",
+      max_drawdown: "Största backgång högst 20 %",
+      win_rate: "Minst 50 % vinnande affärer, minst 20 affärer",
+      no_guard_breaches: "Inga regelbrott senaste 30 dagarna"
+    };
+    const checks = (list, labels) => (list || []).map((c) => {
+      const lab = labels[c.id] || c.label || c.id;
+      return `<div class="rule-check ${c.met ? "ok" : ""}"><span class="mark">${c.met ? "✓" : "○"}</span><span>${h(lab)}</span></div>`;
+    }).join("");
+    const laneNames = { memecoin: "Memecoins", majors: "Större coins", gold: "Guld", commodities: "Råvaror", stocks: "Aktier" };
+    const gradLanes = (grad.lanes || []).map((ln) => {
+      const name = laneNames[ln.id] || ln.id;
+      const pct = ln.progress_pct != null ? Math.round(ln.progress_pct) : null;
+      return `<div class="rule-item">
+        <div class="row-title">${h(name)}${ln.eligible ? " · klart för LIVE" : ""}</div>
+        ${pct != null ? `<div class="row-sub">${h(pct)} % av bevisen i PAPER</div>` : ""}
+        ${checks(ln.criteria, gradLabel)}
+      </div>`;
+    }).join("");
+    const paused = d.entries_paused;
+    return `${topbar({ title: "Regler", back: "#/account", backLabel: "Konto" })}
+    <div class="screen"><div class="page">
+      <p class="rules-lead">Här är reglerna botarna följer just nu. De skyddar kontot. Inget ändras förrän du godkänner det här i appen — inte i Telegram.</p>
+
+      ${paused ? `<div class="card"><div class="card-h">Köppaus</div><div class="rule-item"><div class="row-title">Nya köp är pausade</div><div class="row-sub">${h(d.entries_paused_reason || "Kontot är pausat just nu.")}</div></div></div>` : ""}
+
+      <div class="card">
+        <div class="card-h">Risk</div>
+        <div class="rule-item"><div class="row-title">Högst ${h(tradePct)} % per affär</div><div class="row-sub">Botarna får inte riskera mer än så av värdet i en enda trade.</div></div>
+        <div class="rule-item"><div class="row-title">Dagen −${h(dailyLim)} %: stopp för nya köp</div><div class="row-sub">Om dagen går så mycket back stoppas nya köp resten av dagen.</div></div>
+        <div class="rule-item"><div class="row-title">Veckan −${h(weekLim)} %: halv storlek</div><div class="row-sub">Om veckan går så mycket back handlar botarna med halv storlek.</div></div>
+        <div class="rule-item"><div class="row-title">−${h(ddLim)} % från toppen: paus</div><div class="row-sub">Om värdet faller så mycket från toppen pausas nya köp.</div></div>
+      </div>
+
+      <div class="card">
+        <div class="card-h">Fördelning</div>
+        <div class="rule-item"><div class="row-title">Högst 50 % i ett spår eller en coin</div><div class="row-sub">Ingen marknad får ta mer än hälften av kontot.</div></div>
+        <div class="rule-item"><div class="row-title">Minst 10 % i reserv</div><div class="row-sub">En tiondel ska alltid ligga undan.</div></div>
+        <div class="rule-item"><div class="row-title">Högst 15 procentenheter per flytt, en gång per dygn</div><div class="row-sub">Botarna får inte flytta mer än så, och inte oftare än en gång på 24 timmar.</div></div>
+        <div class="rule-item"><div class="row-title">Just nu</div><div class="row-sub">Mål: ${h(split.memecoin)} % memecoins · ${h(split.majors)} % större coins · ${h(split.reserve)} % reserv.</div></div>
+      </div>
+
+      <div class="card">
+        <div class="card-h">Hävstång</div>
+        <div class="rule-item">
+          <div class="row-title">${levLocked ? "Låst på 1×" : "Olåst, högst " + h(levCap) + "×"}</div>
+          <div class="row-sub">Hävstången är låst tills alla villkor är uppfyllda. Max är 3× när den är olåst. Botarna kan inte höja taket.</div>
+        </div>
+        ${checks(lev.criteria, critLabel) || `<div class="rule-check"><span class="mark">○</span><span>Minst 90 dagar i gång</span></div>
+        <div class="rule-check"><span class="mark">○</span><span>Plusresultat totalt</span></div>
+        <div class="rule-check"><span class="mark">○</span><span>Största backgång högst 20 %</span></div>
+        <div class="rule-check"><span class="mark">○</span><span>Minst 30 affärer, minst 50 % vinnande</span></div>
+        <div class="rule-check"><span class="mark">○</span><span>Inga regelbrott senaste 30 dagarna</span></div>`}
+      </div>
+
+      <div class="card">
+        <div class="card-h">PAPER och LIVE</div>
+        <div class="rule-item">
+          <div class="row-title">Allt körs i PAPER tills du skriver LIVE</div>
+          <div class="row-sub">Just nu: ${mode === "LIVE" ? "LIVE" : "PAPER"}. Ett spår blir aktuellt för LIVE först efter bevis i PAPER. Du måste själv skriva LIVE — botarna kan inte slå på det.</div>
+        </div>
+        ${gradLanes || `<div class="rule-check"><span class="mark">○</span><span>Minst 60 dagar i PAPER</span></div>
+        <div class="rule-check"><span class="mark">○</span><span>Plusresultat i spåret</span></div>
+        <div class="rule-check"><span class="mark">○</span><span>Största backgång högst 20 %</span></div>
+        <div class="rule-check"><span class="mark">○</span><span>Minst 20 affärer, minst 50 % vinnande</span></div>
+        <div class="rule-check"><span class="mark">○</span><span>Inga regelbrott senaste 30 dagarna</span></div>`}
+      </div>
     </div></div>`;
   }
 
@@ -816,7 +1025,7 @@
           <button class="copy-btn" data-action="notify">Slå på</button>
         </div>
         ${window.DeskFun ? DeskFun.soundToggle() : ""}
-        <a class="row" href="approve.html" data-keep><div class="row-body"><div class="row-title">Regler</div><div class="row-sub">Godkänn regelförslag och återuppta köp</div></div>${svg("chev")}</a>
+        <a class="row" href="#/regler" data-nav="#/regler"><div class="row-body"><div class="row-title">Regler</div><div class="row-sub">Så här skyddas kontot</div></div>${svg("chev")}</a>
       </div>
 
       ${window.DeskFun ? DeskFun.laneHistory(state.lanes) : ""}
@@ -836,8 +1045,10 @@
 
   function lightbox() {
     if (!state.lightbox) return "";
+    const src = DeskAPI.screenUrl && DeskAPI.screenUrl();
+    if (!src) { state.lightbox = false; return ""; }
     return `<div class="lightbox"><button class="close" data-action="close-lightbox">Stäng</button>
-      <img src="${h(DeskAPI.screenUrl())}" alt="Live-skärm">
+      <img src="${h(src)}" alt="">
     </div>`;
   }
 
@@ -845,7 +1056,7 @@
     if (route.name === "chat") return ""; // full-screen chat, no tab bar
     if (route.name === "bots" || route.name === "bot") return "bots";
     if (route.name === "activity") return "activity";
-    if (route.name === "account") return "account";
+    if (route.name === "account" || route.name === "regler") return "account";
     return "home";
   }
 
@@ -880,6 +1091,7 @@
     else if (route.name === "bots") body = renderBots();
     else if (route.name === "bot") body = renderBot();
     else if (route.name === "activity") body = renderActivity();
+    else if (route.name === "regler") body = renderRegler();
     else if (route.name === "account") body = renderAccount();
     else body = renderHome();
 
@@ -944,11 +1156,33 @@
     } catch (_) {}
   }
   window.DeskToast = (m) => toast(m);
-  setInterval(() => { if (!document.hidden) loadFun().then(() => { if (["home", "bots", "account", "chat"].includes(state.route.name)) render({ keepScroll: true }); }); }, 60000);
+  async function pollSnapshot() {
+    if (document.hidden || !(DeskAPI.isUnlocked && DeskAPI.isUnlocked())) return;
+    try {
+      const [desk, live, act] = await Promise.all([
+        DeskAPI.getState().catch(() => null),
+        DeskAPI.getLive ? DeskAPI.getLive().catch(() => null) : null,
+        DeskAPI.getActivity({ kind: state.activityFilter }).catch(() => null)
+      ]);
+      if (desk) state.desk = desk;
+      if (live) state.live = live;
+      if (act) state.activity = act;
+      await loadFun();
+      if (["home", "bots", "account", "chat", "regler", "activity"].includes(state.route.name)) {
+        render({ keepScroll: true });
+      }
+    } catch (_) {}
+  }
+  setInterval(pollSnapshot, 60000);
 
   async function loadRoute() {
     const r = state.route;
     state.error = null;
+    if (!(DeskAPI.isUnlocked && DeskAPI.isUnlocked())) {
+      state.loading = false;
+      render({ keepScroll: false });
+      return;
+    }
     try {
       if (!state.desk) {
         state.loading = true;
@@ -959,10 +1193,15 @@
       if (r.name === "home") {
         state.loading = true;
         render();
-        const [c, mv] = await Promise.all([DeskAPI.getChart(state.chartRange), DeskAPI.getMovers ? DeskAPI.getMovers(state.chartRange).catch(() => null) : null]);
+        const [c, mv, live] = await Promise.all([
+          DeskAPI.getChart(state.chartRange),
+          DeskAPI.getMovers ? DeskAPI.getMovers(state.chartRange).catch(() => null) : null,
+          DeskAPI.getLive ? DeskAPI.getLive().catch(() => DeskAPI.getActivity({}).catch(() => null)) : DeskAPI.getActivity({}).catch(() => null)
+        ]);
         state.chart = c;
         if (c && c.range && c.range !== state.chartRange) state.chartRange = c.range;
         if (mv) state.movers = mv;
+        if (live) { state.live = live; if (!state.activity) state.activity = live; }
         state.loading = false;
         render({ keepScroll: false });
         return;
@@ -1007,9 +1246,20 @@
       render();
     } catch (err) {
       state.loading = false;
-      state.error = err && err.status === 401 ? "Fel kod, eller så gick sessionen ut." :
-        err && err.status === 404 ? "Inget hittades för den här skärmen." :
-        (err && err.message) || "Nätverksfel.";
+      if (isUnlockError(err)) {
+        if (DeskAPI.logout) DeskAPI.logout();
+        state.desk = null;
+        state.fun = null;
+        state.chart = null;
+        state.movers = null;
+        state.live = null;
+        state.activity = null;
+        state.error = null;
+        state.lockError = null;
+        render({ keepScroll: false });
+        return;
+      }
+      state.error = swedishLoadError(err);
       render();
     }
   }
@@ -1122,7 +1372,7 @@
       render({ keepScroll: true });
       DeskAPI.getActivity({ kind: state.activityFilter }).then((a) => {
         state.activity = a; state.loading = false; render({ keepScroll: true });
-      }).catch((err) => { state.loading = false; state.error = err.message; render({ keepScroll: true }); });
+      }).catch((err) => { state.loading = false; state.error = swedishLoadError(err); render({ keepScroll: true }); });
       return;
     }
     const laneBtn = e.target.closest("[data-lane]");
@@ -1136,7 +1386,15 @@
     const action = e.target.closest("[data-action]");
     if (!action) return;
     const act = action.getAttribute("data-action");
-    if (act === "retry") { loadRoute(); }
+    if (act === "login-again" || act === "retry") {
+      e.preventDefault();
+      if (DeskAPI.logout) DeskAPI.logout();
+      state.desk = null; state.fun = null; state.chart = null; state.movers = null;
+      state.live = null; state.activity = null;
+      state.error = null; state.lockError = null;
+      render({ keepScroll: false });
+      return;
+    }
     if (act === "lightbox") { e.preventDefault(); state.lightbox = true; render({ keepScroll: true }); }
     if (act === "close-lightbox") { e.preventDefault(); state.lightbox = false; render({ keepScroll: true }); }
     if (act === "copy-wallet") {
@@ -1161,7 +1419,13 @@
   window.addEventListener("resize", () => afterPaint());
 
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("./sw.js").catch(() => {});
+    navigator.serviceWorker.register("./sw.js").then((reg) => { try { reg.update(); } catch (_) {} }).catch(() => {});
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (refreshing) return;
+      refreshing = true;
+      location.reload();
+    });
   }
 
   DeskAPI.captureTokenFromUrl();
@@ -1170,13 +1434,10 @@
     render();
     loadRoute();
     DeskAPI.openStream({
-      state(s) { state.desk = Object.assign(state.desk || {}, s); render(); },
-      activity() { /* stay put; user can refresh the feed */ },
-      tick() {
-        if (state.route.name === "home" && document.getElementById("desk-screen")) {
-          document.getElementById("desk-screen").src = DeskAPI.screenUrl();
-        }
-      }
+      state(s) { state.desk = Object.assign(state.desk || {}, s); render({ keepScroll: true }); },
+      activity(a) { if (a) { state.activity = a; if (state.route.name === "activity") render({ keepScroll: true }); } },
+      live(a) { if (a) { state.live = a; if (state.route.name === "home") render({ keepScroll: true }); } },
+      tick() { /* snapshot poll refreshes Live-flödet varje minut */ }
     });
   };
   if (DeskAPI.tryRememberedUnlock) {

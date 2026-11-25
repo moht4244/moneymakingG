@@ -1,20 +1,13 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Moneymaking G · Rule proposals</title>
-<style>body{font:15px -apple-system,system-ui,sans-serif;background:#0e1014;color:#e6e6e6;margin:0;padding:16px}
-.card{background:#181b22;border-radius:12px;padding:14px;margin:10px 0}button{border:0;border-radius:8px;padding:8px 14px;margin-right:8px;font-weight:600}
-.ok{background:#2fbf71;color:#fff}.no{background:#3a3f4b;color:#fff}.muted{color:#9aa}</style></head><body>
-<h2>Regler</h2><div id="pause"></div><h3>Regelförslag</h3><p class="muted">Reviewer föreslår – inget ändras förrän du godkänner här. Telegram kan inte godkänna.</p><div id="list">Laddar…</div>
-<script>
-const t=localStorage.getItem("APP_TOKEN")||new URLSearchParams(location.hash.slice(1)).get("t")||"";
-if(t)localStorage.setItem("APP_TOKEN",t);
-const H={"Authorization":"Bearer "+t,"X-App-Token":t};
-const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-async function load(){const r=await fetch("api/proposals",{headers:H});if(!r.ok){list.textContent="Öppna appens länk med din token först.";return}
-const d=await r.json();list.innerHTML=d.items.length?d.items.map(p=>`<div class="card"><b>${esc(p.setting_key)}</b> ${esc(p.current_value)} → <b>${esc(p.proposed_value)}</b>
-<div class="muted">${esc(p.rationale)} · ${esc(p.status)}</div>${p.status==="pending"?`<p><button class="ok" onclick="act(${p.id},'approve')">Godkänn</button><button class="no" onclick="act(${p.id},'reject')">Avslå</button></p>`:""}</div>`).join(""):"Inga förslag än."}
-async function act(id,a){if(a==="approve"&&!confirm("Ändra regeln?"))return;await fetch(`api/proposals/${id}/${a}`,{method:"POST",headers:H});load()}
-async function pauseLoad(){const r=await fetch("api/entries",{headers:H});if(!r.ok)return;const d=await r.json();
-pause.innerHTML=d.paused?`<div class="card"><b>⏸️ Nya köp är pausade</b><div class="muted">${esc(d.reason)}</div><p><button class="ok" onclick="resume()">Återuppta köp</button></p></div>`:`<div class="card">✅ Nya köp är igång</div>`}
-async function resume(){if(!confirm("Återuppta nya köp?"))return;await fetch("api/entries/resume",{method:"POST",headers:H});pauseLoad()}
-load();pauseLoad();
-</script></body></html>
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="0;url=./#/regler">
+  <title>Regler</title>
+</head>
+<body>
+  <p><a href="./#/regler">Öppna reglerna</a></p>
+  <script>location.replace("./#/regler");</script>
+</body>
+</html>

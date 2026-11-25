@@ -1,14 +1,8 @@
-/* Moneymaking G service worker — cache static shell, always network for /api/ */
-const CACHE = "moneymaking-g-v6";
+/* Moneymaking G service worker — network-first for the shell (index + JS), cache-first for assets */
+const CACHE = "moneymaking-g-v7";
 const PRECACHE = [
-  "./",
-  "./index.html",
   "./css/app.css",
-  "./js/api.js",
-  "./js/fun.js",
-  "./js/app.js",
   "./sounds/kaching.wav",
-  "./js/charts.js",
   "./manifest.json",
   "./apple-touch-icon.png",
   "./icon-192.png",
@@ -24,17 +18,40 @@ self.addEventListener("install", (event) => {
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))
-    ).then(() => self.clients.claim())
+    caches.keys().then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
+      .then(() => caches.open(CACHE).then((cache) => cache.addAll(PRECACHE)))
+      .then(() => self.clients.claim())
   );
 });
 
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "SKIP_WAITING") self.skipWaiting();
+});
+
+function isShell(request, url) {
+  const dest = request.destination;
+  if (dest === "script" || dest === "document") return true;
+  const path = url.pathname;
+  return /\/index\.html$|\/sw\.js$|\/js\/[^/]+\.js$|\/$/.test(path);
+}
+
 self.addEventListener("fetch", (event) => {
-  const url = new URL(event.request.url);
   if (event.request.method !== "GET") return;
+  const url = new URL(event.request.url);
   if (url.pathname.includes("/api/") || url.searchParams.has("stream")) {
     event.respondWith(fetch(event.request));
+    return;
+  }
+  if (isShell(event.request, url)) {
+    event.respondWith(
+      fetch(event.request, { cache: "no-store" }).then((res) => {
+        if (res && res.ok && res.type !== "opaque") {
+          const copy = res.clone();
+          caches.open(CACHE).then((cache) => cache.put(event.request, copy));
+        }
+        return res;
+      }).catch(() => caches.match(event.request))
+    );
     return;
   }
   event.respondWith(
