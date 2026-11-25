@@ -16,20 +16,21 @@
     regime: "#98989D",
     majors: "#FFB340",
     shadow: "#8E8E93",
-    telegram: "#2AABEE"
+    telegram: "#2AABEE",
+    meme_test: "#FF7AD9"
   };
   const BOT_ORDER = [
-    "scanner", "analyst", "brain", "executor", "risk",
+    "scanner", "analyst", "brain", "executor", "risk", "meme_test",
     "research", "whale", "sentiment",
     "rug_guard", "portfolio", "reviewer"
   ];
   const BOT_GROUPS = [
-    { title: "Kärnan", names: ["scanner", "analyst", "brain", "executor", "risk"] },
+    { title: "Kärnan", names: ["scanner", "analyst", "brain", "executor", "risk", "meme_test"] },
     { title: "Marknaden", names: ["regime", "majors", "research", "whale", "sentiment"] },
     { title: "Skydd & portfölj", names: ["rug_guard", "portfolio", "reviewer", "shadow", "telegram"] }
   ];
   const MAJORS = new Set(["SOL", "JUP", "JTO", "BONK", "WIF", "PYTH", "RAY"]);
-  const LANE_LABELS = { memecoins: "Memecoins", majors: "Större coins", gold: "Guld", commodities: "Råvaror", stocks: "Aktier", assets: "Tillgångar" };
+  const LANE_LABELS = { memecoins: "Memecoins", majors: "Större coins", gold: "Guld", commodities: "Råvaror", stocks: "Aktier", assets: "Tillgångar", meme_test: "Meme-test" };
   const APP_NAME = "Moneymaking G";
 
   const $app = document.getElementById("app");
@@ -203,6 +204,7 @@
   function laneOf(item) {
     if (!item) return null;
     const raw = String(item.lane || "").toLowerCase();
+    if (raw === "meme_test" || raw === "meme-test") return "meme_test";
     if (raw === "memecoin" || raw === "memecoins") return "memecoins";
     if (raw === "majors" || raw === "gold" || raw === "commodities" || raw === "stocks" || raw === "assets") return raw;
     if (item.symbol && MAJORS.has(String(item.symbol).toUpperCase())) return "majors";
@@ -222,7 +224,7 @@
   }
 
   function laneFilterRow() {
-    const opts = [["all", "Alla"], ["memecoins", "Memecoins"], ["majors", "Större coins"], ["gold", "Guld"]];
+    const opts = [["all", "Alla"], ["memecoins", "Memecoins"], ["meme_test", "Meme-test"], ["majors", "Större coins"], ["gold", "Guld"]];
     return `<div class="filters lane-filters">
       ${opts.map(([id, lab]) => `<button type="button" data-lane="${id}" class="${state.laneFilter === id ? "on" : ""}">${lab}</button>`).join("")}
     </div>`;
@@ -272,7 +274,7 @@
   }
 
   function buildLabel() {
-    const raw = String(window.MMG_BUILD || "").trim() || "v11-20261125";
+    const raw = String(window.MMG_BUILD || "").trim() || "v12-20261125";
     const m = raw.match(/^(v\d+)-(\d{4})(\d{2})(\d{2})$/);
     if (!m) return raw;
     const months = ["jan", "feb", "mars", "apr", "maj", "juni", "juli", "aug", "sep", "okt", "nov", "dec"];
@@ -963,7 +965,7 @@
       const lab = labels[c.id] || c.label || c.id;
       return `<div class="rule-check ${c.met ? "ok" : ""}"><span class="mark">${c.met ? "✓" : "○"}</span><span>${h(lab)}</span></div>`;
     }).join("");
-    const laneNames = { memecoin: "Memecoins", majors: "Större coins", gold: "Guld", commodities: "Råvaror", stocks: "Aktier" };
+    const laneNames = { memecoin: "Memecoins", meme_test: "Meme-test", majors: "Större coins", gold: "Guld", commodities: "Råvaror", stocks: "Aktier" };
     const gradLanes = (grad.lanes || []).map((ln) => {
       const name = laneNames[ln.id] || ln.id;
       const pct = ln.progress_pct != null ? Math.round(ln.progress_pct) : null;

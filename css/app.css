@@ -768,6 +768,7 @@ a.chat-card:active { opacity: 0.88; }
 
 .lane-bar .gold { background: #FFD60A; }
 .lane-gold { background: rgba(255, 214, 10, 0.18); color: #FFD60A; }
+.lane-meme_test { background: rgba(255, 122, 217, 0.18); color: #FF7AD9; }
 .lane-commodities { background: rgba(255, 159, 10, 0.18); color: #FF9F0A; }
 .lane-stocks { background: rgba(50, 215, 75, 0.18); color: #32D74B; }
 .lane-legend { flex-wrap: wrap; gap: 8px 14px; }
