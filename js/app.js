@@ -93,6 +93,15 @@
     moods: null,
     universe: null,
     requests: null,
+    coinTf: "1D",
+    coinChart: null,
+    coinStats: null,
+    coinScrub: null,
+    coinBack: "home",
+    tradeLane: "all",
+    tradeBot: "all",
+    calMonth: null,
+    calDay: null,
     reqFormType: "auto",
     reqFormSym: "",
     reqFormNote: "",
@@ -130,6 +139,10 @@
     if (a === "audit" && parts[1]) return { name: "audit", mint: decodeURIComponent(parts[1]) };
     if (a === "chat") return { name: "chat", bot: parts[1] ? decodeURIComponent(parts[1]) : null };
     if (a === "regler" || a === "rules") return { name: "regler" };
+    if (a === "affarer" || a === "trades" || a === "historik") return { name: "affarer" };
+    if (a === "ranking") return { name: "ranking" };
+    if (a === "kalender" || a === "calendar") return { name: "kalender" };
+    if (a === "live-krav" || a === "livekrav" || a === "step15") return { name: "livekrav" };
     return { name: "home" };
   }
 
@@ -533,12 +546,34 @@
     return (window.DeskAPI && DeskAPI.assetLink) ? DeskAPI.assetLink(item) : null;
   }
 
+  function coinHrefOf(item) {
+    return (window.DeskAPI && DeskAPI.coinHref) ? DeskAPI.coinHref(item) : "";
+  }
+
+  function backForCoin() {
+    const prev = state.coinBack || "home";
+    if (prev === "markets") return { hash: "#/markets", label: "Marknad" };
+    if (prev === "watch") return { hash: "#/watch", label: "Bevaka" };
+    if (prev === "live" || prev === "activity") return { hash: "#/live", label: "Live" };
+    if (prev === "affarer") return { hash: "#/affarer", label: "Affärer" };
+    if (prev === "ranking") return { hash: "#/ranking", label: "Ranking" };
+    if (prev === "kalender") return { hash: "#/kalender", label: "Kalender" };
+    if (prev === "livekrav") return { hash: "#/live-krav", label: "LIVE-krav" };
+    return { hash: "#/home", label: "Hem" };
+  }
+
+  function rememberCoinBack(name) {
+    if (["home", "markets", "watch", "live", "activity", "affarer", "ranking", "kalender", "livekrav"].includes(name)) {
+      state.coinBack = name === "activity" ? "live" : name;
+    }
+  }
+
   function assetRow(item, inner, extraClass, extraAttr) {
     const cls = extraClass || "row";
     const attr = extraAttr ? " " + extraAttr : "";
-    const link = assetLinkOf(item);
-    if (link && link.url) {
-      return `<a class="${cls}" href="${h(link.url)}" target="_blank" rel="noopener"${attr}>${inner}</a>`;
+    const href = coinHrefOf(item);
+    if (href) {
+      return `<a class="${cls}" href="${h(href)}" data-nav="${h(href)}"${attr}>${inner}</a>`;
     }
     return `<div class="${cls}"${attr}>${inner}</div>`;
   }
@@ -580,6 +615,7 @@
           <div class="p-stat"><div class="k">Reserv</div><div class="v nums">${h(resPct)}%</div></div>
         </div>
       </div>
+      ${window.DeskPages && DeskPages.clockChip ? DeskPages.clockChip(state) : ""}
 
       <div class="segments segments-scroll" data-role="chart-range">
         ${chartRangeButtons()}
@@ -602,7 +638,7 @@
               <div class="asset-val nums">${h(fmtUsd(p.value_usd || p.size_usd, { exact: true }))}</div>
               ${pnlStack(p.pnl_pct, p.pnl_usd)}
             </div>
-            ${assetLinkOf(p) ? svg("chev") : ""}`, "row has-avatar asset-row", "")).join("") : `<div class="state" style="padding:26px 16px"><p>Inga öppna positioner i valt spår.</p></div>`}
+            ${coinHrefOf(p) ? svg("chev") : ""}`, "row has-avatar asset-row", "")).join("") : `<div class="state" style="padding:26px 16px"><p>Inga öppna positioner i valt spår.</p></div>`}
       </div>
     </div></div>`;
   }
@@ -615,9 +651,9 @@
     const rng = (state.movers && state.movers.range) || state.chartRange || "today";
     const lab = MOVERS_RANGE_SV[rng] || "perioden";
     const rows = items.length ? items.map((c) => {
-      const link = assetLinkOf(c);
-      const symCell = link && link.url
-        ? `<a href="${h(link.url)}" target="_blank" rel="noopener">${h(c.symbol)}${c.held ? " 💼" : ""}</a>`
+      const href = coinHrefOf(c);
+      const symCell = href
+        ? `<a href="${h(href)}" data-nav="${h(href)}">${h(c.symbol)}${c.held ? " 💼" : ""}</a>`
         : `${h(c.symbol)}${c.held ? " 💼" : ""}`;
       return `<div class="mkt-row">
         <div class="mkt-info">
@@ -721,18 +757,18 @@
           </div>
         </div>
         <div class="market-grid">
-          <div class="market-pair">
+          <a class="market-pair" href="#/coin/BTC" data-nav="#/coin/BTC">
             <div class="k">BTC</div>
             <div class="v nums">${h(fmtUsd(btc.price, { exact: true }))}
               <span class="chg ${chgClass(btc.change_24h_pct)}">${h(fmtPct(btc.change_24h_pct))}</span>
             </div>
-          </div>
-          <div class="market-pair">
+          </a>
+          <a class="market-pair" href="#/coin/SOL" data-nav="#/coin/SOL">
             <div class="k">SOL</div>
             <div class="v nums">${h(fmtUsd(sol.price, { exact: true }))}
               <span class="chg ${chgClass(sol.change_24h_pct)}">${h(fmtPct(sol.change_24h_pct))}</span>
             </div>
-          </div>
+          </a>
         </div>
         ${d && d.market && d.market.news ? `<div class="market-note">${h(d.market.news)}</div>` : ""}
       </div>
@@ -746,10 +782,10 @@
         </div>
         ${filteredMkt.length ? filteredMkt.map((item) => {
           const reqType = item.kind === "stocks" ? "stock" : item.kind === "commodities" ? "commodity" : "crypto";
-          const link = assetLinkOf(item);
+          const href = coinHrefOf(item);
           return `<div class="mkt-row">
             <div class="mkt-info">
-              <div class="mkt-sym">${link && link.url ? `<a href="${h(link.url)}" target="_blank" rel="noopener">${h(item.symbol)}</a>` : h(item.symbol)} <span class="lane lane-assets">${h(item.category)}</span></div>
+              <div class="mkt-sym">${href ? `<a href="${h(href)}" data-nav="${h(href)}">${h(item.symbol)}</a>` : h(item.symbol)} <span class="lane lane-assets">${h(item.category)}</span></div>
               <div class="mkt-sub">${h(item.name || item.venue)} · ${h(item.venue)}</div>
             </div>
             <div class="mkt-px nums">${item.price != null ? h(fmtUsd(item.price, { exact: true })) : "—"}</div>
@@ -912,11 +948,11 @@
             r.alert_below != null ? `under $${r.alert_below}` : ""
           ].filter(Boolean).join(" / ");
           const copyText = `Bevaka ${r.symbol} (${reqTypeLabel(r.asset_type)})${alertText ? " larm " + alertText : ""}${r.note ? ": " + r.note : ""}`;
-          const link = assetLinkOf({ symbol: r.symbol, mint: r.mint || r.resolved_mint, venue: r.asset_type === "stock" ? "hyperliquid" : "solana" });
+          const href = coinHrefOf({ symbol: r.symbol, mint: r.mint || r.resolved_mint, venue: r.asset_type === "stock" ? "hyperliquid" : "solana" });
           return `<div class="req-item">
             <div class="req-top">
               <div>
-                <div class="req-sym">${link && link.url ? `<a href="${h(link.url)}" target="_blank" rel="noopener">${h(r.symbol)}</a>` : h(r.symbol)} <span class="lane lane-assets">${h(reqTypeLabel(r.asset_type))}</span> <span class="req-status ${h(st)}">${h(reqStatusLabel(st))}</span></div>
+                <div class="req-sym">${href ? `<a href="${h(href)}" data-nav="${h(href)}">${h(r.symbol)}</a>` : h(r.symbol)} <span class="lane lane-assets">${h(reqTypeLabel(r.asset_type))}</span> <span class="req-status ${h(st)}">${h(reqStatusLabel(st))}</span></div>
               </div>
               <div class="req-px-box">
                 <div class="req-px-val nums">${h(pxStr)}</div>
@@ -960,7 +996,7 @@
               <div class="row-sub">${h(w.reason || w.name || "")}</div>
             </div>
             <div class="row-meta"><div class="tiny">${w.score != null ? "Score " + h(w.score) : ""}</div></div>
-            ${assetLinkOf(w) ? svg("chev") : ""}`, "row has-avatar")).join("")}
+            ${coinHrefOf(w) ? svg("chev") : ""}`, "row has-avatar")).join("")}
       </div>` : ""}
 
       ${picks.length ? `<div class="card">
@@ -1033,6 +1069,7 @@
       <div class="bubble">
         <div class="who"><span class="who-name">${h(who)}</span>${tag ? `<span class="kind-tag">${h(tag)}</span>` : ""}<span class="when">${h(sthlmStamp(it.ts) || relTime(it.ts) || "")}</span></div>
         <div class="bubble-text">${h(it.text)}</div>
+        ${coinHrefOf(it) && (it.symbol || it.mint) ? `<a class="coin-chip" href="${h(coinHrefOf(it))}" data-nav="${h(coinHrefOf(it))}">${h(it.symbol || "Coin")}</a>` : ""}
         ${it.pnl_usd != null && (it.kind === "sell" || it.kind === "stop") ? `<div class="chg ${chgClass(it.pnl_usd)} nums">${h(fmtUsd(it.pnl_usd, { exact: true }))}</div>` : ""}
       </div>
     </div>`;
@@ -1180,6 +1217,26 @@
           <span class="t">Bevaka</span>
           <span class="s">Begär coin/aktie ›</span>
         </a>
+        <a class="hub-tile" href="#/affarer" data-nav="#/affarer">
+          <span class="ico">📜</span>
+          <span class="t">Affärer</span>
+          <span class="s">Stängda trades ›</span>
+        </a>
+        <a class="hub-tile" href="#/ranking" data-nav="#/ranking">
+          <span class="ico">📊</span>
+          <span class="t">Bot-ranking</span>
+          <span class="s">Win rate & PnL ›</span>
+        </a>
+        <a class="hub-tile" href="#/kalender" data-nav="#/kalender">
+          <span class="ico">📅</span>
+          <span class="t">PnL-kalender</span>
+          <span class="s">Dag för dag ›</span>
+        </a>
+        <a class="hub-tile" href="#/live-krav" data-nav="#/live-krav">
+          <span class="ico">⏳</span>
+          <span class="t">LIVE-krav</span>
+          <span class="s">60 dagar & STEP 15 ›</span>
+        </a>
       </div>
 
       <div class="card">
@@ -1288,7 +1345,17 @@
     <div class="chat-screen">${page.html}</div>`;
   }
 
+  function bindUI() {
+    window.DeskUI = {
+      h, fmtUsd, fmtPct, topbar, pillPaperOrLive, tokenAvatar, laneChip, laneOf,
+      chgClass, pnlStack, svg, openMarketBtn, botMeta, emptyView, skeleton, errorView,
+      ageLabel, assetLinkOf, coinHrefOf, backForCoin
+    };
+  }
+
   function renderCoin() {
+    bindUI();
+    if (window.DeskCoin && DeskCoin.render) return DeskCoin.render(state);
     if (state.loading && !state.coin) return `${topbar({ title: "Coin", back: "#/home" })}${skeleton()}`;
     if (state.error) return errorView(state.error, "#/home");
     const c = state.coin;
@@ -1519,7 +1586,7 @@
     if (route.name === "markets") return "markets";
     if (route.name === "watch") return "watch";
     if (route.name === "activity" || route.name === "live") return "live";
-    if (route.name === "account" || route.name === "bots" || route.name === "bot" || route.name === "regler" || route.name === "awards") return "account";
+    if (route.name === "account" || route.name === "bots" || route.name === "bot" || route.name === "regler" || route.name === "awards" || route.name === "affarer" || route.name === "ranking" || route.name === "kalender" || route.name === "livekrav") return "account";
     return "home";
   }
 
@@ -1730,6 +1797,7 @@
   }
 
   function render(opts) {
+    bindUI();
     const keep = !(opts && opts.keepScroll === false);
     const snap = keep ? captureScroll() : null;
     const route = state.route;
@@ -1746,6 +1814,10 @@
     else if (route.name === "bot") body = renderBot();
     else if (route.name === "activity" || route.name === "live") body = renderLive();
     else if (route.name === "regler") body = renderRegler();
+    else if (route.name === "affarer") { bindUI(); body = window.DeskPages ? DeskPages.renderTrades(state) : renderAccount(); }
+    else if (route.name === "ranking") { bindUI(); body = window.DeskPages ? DeskPages.renderRanking(state) : renderAccount(); }
+    else if (route.name === "kalender") { bindUI(); body = window.DeskPages ? DeskPages.renderCalendar(state) : renderAccount(); }
+    else if (route.name === "livekrav") { bindUI(); body = window.DeskPages ? DeskPages.renderLiveKrav(state) : renderAccount(); }
     else if (route.name === "account") body = renderAccount();
     else body = renderHome();
 
@@ -1770,8 +1842,7 @@
     if (eq && state.chart && state.chart.points) DeskCharts.drawEquity(eq, state.chart.points);
     const feed = document.getElementById("chat-feed");
     if (feed && state.route.name === "live") feed.scrollTop = feed.scrollHeight;
-    const px = document.getElementById("price-chart");
-    if (px && state.coin && state.coin.chart) DeskCharts.drawPrice(px, state.coin.chart);
+    if (state.route.name === "coin" && window.DeskCoin && DeskCoin.mount) DeskCoin.mount(state);
   }
 
   function patchChartAndMovers() {
@@ -1908,10 +1979,17 @@
       if (r.name === "coin") {
         state.loading = true;
         state.coin = null;
+        state.coinChart = null;
+        state.coinStats = null;
+        state.coinScrub = null;
         render();
         state.coin = await DeskAPI.getCoin(r.mint);
         state.loading = false;
         render();
+        if (window.DeskCoin && DeskCoin.loadChart) {
+          await DeskCoin.loadChart(state);
+          if (state.route.name === "coin") render({ keepScroll: true });
+        }
         return;
       }
       if (r.name === "audit") {
@@ -2232,6 +2310,50 @@
       else render({ keepScroll: true });
       return;
     }
+    const coinTf = e.target.closest("[data-coin-tf]");
+    if (coinTf) {
+      e.preventDefault();
+      const id = coinTf.getAttribute("data-coin-tf") || "1D";
+      if (id === state.coinTf) return;
+      state.coinTf = id;
+      state.coinScrub = null;
+      render({ keepScroll: true });
+      if (window.DeskCoin && DeskCoin.loadChart) {
+        DeskCoin.loadChart(state).then(() => {
+          if (state.route.name === "coin") render({ keepScroll: true });
+        });
+      }
+      return;
+    }
+    const tradeLane = e.target.closest("[data-trade-lane]");
+    if (tradeLane) {
+      e.preventDefault();
+      state.tradeLane = tradeLane.getAttribute("data-trade-lane") || "all";
+      render({ keepScroll: true });
+      return;
+    }
+    const tradeBot = e.target.closest("[data-trade-bot]");
+    if (tradeBot) {
+      e.preventDefault();
+      state.tradeBot = tradeBot.getAttribute("data-trade-bot") || "all";
+      render({ keepScroll: true });
+      return;
+    }
+    const calMonth = e.target.closest("[data-cal-month]");
+    if (calMonth) {
+      e.preventDefault();
+      state.calMonth = calMonth.getAttribute("data-cal-month");
+      state.calDay = null;
+      render({ keepScroll: true });
+      return;
+    }
+    const calDay = e.target.closest("[data-cal-day]");
+    if (calDay) {
+      e.preventDefault();
+      state.calDay = calDay.getAttribute("data-cal-day");
+      render({ keepScroll: true });
+      return;
+    }
     const mktFilter = e.target.closest("[data-mkt-filter]");
     if (mktFilter) {
       e.preventDefault();
@@ -2413,6 +2535,7 @@
   document.addEventListener("touchcancel", ptrOnEnd);
 
   window.addEventListener("hashchange", () => {
+    rememberCoinBack(state.route && state.route.name);
     state.route = parseRoute();
     state.error = null;
     render({ keepScroll: false });

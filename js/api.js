@@ -409,6 +409,10 @@
     if (u === "/api/moods" || u === "api/moods") return s.moods || {};
     if (u === "/api/requests" || u === "api/requests") return { items: s.requests || [], watching: (s.state && s.state.watching) || [] };
     if (u === "/api/universe" || u === "api/universe") return { items: (s.assets && s.assets.universe) || [], perps: (s.assets && s.assets.perps) || [] };
+    if (u === "/api/trades" || u === "api/trades") return { items: s.trades || [] };
+    if (u === "/api/ranking" || u === "api/ranking") return { items: s.ranking || [] };
+    if (u === "/api/calendar" || u === "api/calendar") return s.calendar || { days: [] };
+    if (u === "/api/paper-clock" || u === "api/paper-clock") return { clock: s.paper_clock || {}, step15: s.step15 || {} };
     const coinM = u.match(/^(?:\/)?api\/coin\/(.+)$/);
     if (coinM) return coinFromSnap(decodeURIComponent(coinM[1]));
     const auditM = u.match(/^(?:\/)?api\/audit\/(.+)$/);
@@ -449,28 +453,50 @@
       const w = fun.week && fun.week[key];
       if (w) hits.push(w);
     }
-    return hits.find((x) => x && (x.mint === id || x.market === id || x.symbol === id)) || null;
+    for (const it of (s.trades || [])) hits.push(it);
+    for (const it of (s.markers || [])) hits.push(it);
+    for (const it of ((s.majors && s.majors.coins) || [])) hits.push(it);
+    for (const it of ((s.majors && s.majors.universe) || [])) hits.push(it);
+    const want = String(id || "");
+    const wantU = want.toUpperCase();
+    return hits.find((x) => x && (x.mint === want || x.market === want || x.symbol === want || String(x.symbol || "").toUpperCase() === wantU)) || null;
   }
 
   function coinFromSnap(id) {
     const s = snapCache || {};
     const st = s.state || {};
-    const pos = (st.positions || []).find((p) => p.mint === id) || null;
+    const wantId = String(id || "");
+    const pos = (st.positions || []).find((p) => p.mint === id || String(p.symbol || "").toUpperCase() === wantId.toUpperCase()) || null;
     const found = snapFindAsset(id);
-    const symbol = (pos && pos.symbol) || (found && found.symbol) || null;
+    const symbol = (pos && pos.symbol) || (found && found.symbol) || (/^[A-Z0-9.]{1,12}$/.test(wantId.toUpperCase()) ? wantId.toUpperCase() : null);
     const name = (pos && pos.name) || (found && found.name) || symbol;
     const lane = (pos && pos.lane) || (found && found.lane) || (found && found.category) || null;
-    const price = (pos && (pos.mark_usd || pos.price_usd)) || (found && (found.price || found.price_usd || found.mark_usd)) || null;
-    const change = found && (found.change_pct != null ? found.change_pct : found.change_24h);
-    const empty = !pos && !found && !symbol;
+    let price = (pos && (pos.mark_usd || pos.price_usd)) || (found && (found.price || found.price_usd || found.mark_usd)) || null;
+    let change = found && (found.change_pct != null ? found.change_pct : found.change_24h);
+    const mkt = st.market || {};
+    const tickU = String(symbol || wantId).toUpperCase();
+    if (price == null && (tickU === "BTC" || tickU === "SOL") && mkt[tickU.toLowerCase()]) {
+      price = mkt[tickU.toLowerCase()].price;
+      if (change == null) change = mkt[tickU.toLowerCase()].change_24h_pct;
+    }
+    const known = /^(BTC|ETH|SOL|DOGE|XRP|ADA|AVAX|LINK|DOT|LTC|BNB|SUI|PAXG|BONK|WBTC|WETH|GOLD|AAPL|MSFT|NVDA|TSLA)$/.test(tickU);
+    const empty = !pos && !found && !symbol && !known;
     const links = assetLink({ mint: id, symbol, lane, category: found && found.category, venue: found && found.venue });
+    const wantU = String((symbol || id) || "").toUpperCase();
+    const markers = ((s.markers) || []).filter((m) => m && (m.mint === id || m.mint === (pos && pos.mint) || String(m.symbol || "").toUpperCase() === wantU));
+    const series = (s.series || {})[id] || (pos && s.series && s.series[pos.mint]) || [];
+    const reasons = [];
+    markers.forEach((m) => { if (m.reason) reasons.push({ ts: m.t, side: m.side, bot: m.bot, text: m.reason }); });
+    if (found && (found.thesis || found.reason)) reasons.push({ ts: null, side: "thesis", bot: "brain", text: found.thesis || found.reason });
     return {
-      mint: id, symbol: symbol || null, name: name || null, lane,
+      mint: (pos && pos.mint) || (found && found.mint) || id,
+      symbol: symbol || null, name: name || null, lane, venue: found && found.venue,
       price_usd: price, change_1h: found && found.change_1h, change_24h: change,
-      mc_usd: found && found.mc_usd, liq_usd: found && found.liq_usd,
+      mc_usd: found && found.mc_usd, fdv_usd: found && found.fdv_usd, liq_usd: found && found.liq_usd,
       volume_24h: found && found.volume_24h, holders: found && found.holders,
       age_min: found && found.age_min, thesis: found && (found.thesis || found.reason) || null,
-      score: found && found.score, decision: found && found.decision, chart: [],
+      score: found && found.score, decision: found && found.decision,
+      chart: series, markers: markers, reasons: reasons,
       position: pos, links: links ? { open: links.url, label: links.label, button: links.button } : {},
       empty: !!empty
     };
@@ -551,6 +577,22 @@
     return "https://www.tradingview.com/symbols/" + encodeURIComponent(s) + "/";
   }
 
+  function coinIdOf(item) {
+    item = item || {};
+    const mint = item.mint || item.address || item.resolved_mint || item.market || "";
+    if (mint && isSolanaMint(mint) && !isWalletAddress(mint)) return mint;
+    if (mint && !isSolanaMint(mint) && String(mint).length <= 24) return String(mint);
+    const tick = tickerOf(item);
+    if (tick) return tick;
+    if (mint && !isWalletAddress(mint)) return String(mint);
+    return "";
+  }
+
+  function coinHref(item) {
+    const id = coinIdOf(item);
+    return id ? "#/coin/" + encodeURIComponent(id) : "";
+  }
+
   function assetLink(item) {
     item = item || {};
     const mint = item.mint || item.address || "";
@@ -602,6 +644,10 @@
     if (u.indexOf("requests") >= 0) return { items: [], watching: [] };
     if (u.indexOf("universe") >= 0) return { items: [], perps: [] };
     if (u.indexOf("moods") >= 0) return {};
+    if (u.indexOf("trades") >= 0) return { items: [] };
+    if (u.indexOf("ranking") >= 0) return { items: [] };
+    if (u.indexOf("calendar") >= 0) return { days: [] };
+    if (u.indexOf("paper-clock") >= 0) return { clock: {}, step15: {} };
     return {};
   }
 
@@ -685,6 +731,21 @@
     async getCoin(mint) {
       return liveGet("/api/coin/" + encodeURIComponent(mint));
     },
+    async getTrades() {
+      return liveGet("/api/trades");
+    },
+    async getRanking() {
+      return liveGet("/api/ranking");
+    },
+    async getCalendar() {
+      return liveGet("/api/calendar");
+    },
+    async getPaperClock() {
+      return liveGet("/api/paper-clock");
+    },
+    _snap() { return snapCache; },
+    coinHref,
+    coinIdOf,
 
     async getAudit(mint) {
       return liveGet("/api/audit/" + encodeURIComponent(mint));
@@ -871,6 +932,8 @@
     },
 
     assetLink,
+    coinHref,
+    coinIdOf,
 
     openStream(handlers) {
       if (isUnlocked() || isSnapshotOnly()) {

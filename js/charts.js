@@ -248,5 +248,214 @@
   function drawEquity(canvas, points) { draw(canvas, points, "equity", "usd"); }
   function drawPrice(canvas, points) { draw(canvas, points, "p", "px"); }
 
-  global.DeskCharts = { drawEquity, drawPrice };
+  const COIN_GREEN = "#0ECB81";
+  const COIN_RED = "#F6465D";
+
+  function drawCoin(canvas, points, opts) {
+    if (!canvas) return;
+    opts = opts || {};
+    const key = opts.key || "p";
+    const markers = (opts.markers || []).filter((m) => m && m.t != null && isFinite(+m.t));
+    const onScrub = typeof opts.onScrub === "function" ? opts.onScrub : null;
+    const { ctx, w, h } = setup(canvas);
+    const empty = !points || points.length < 2;
+    if (empty) {
+      ctx.fillStyle = LABEL;
+      ctx.font = "14px -apple-system, BlinkMacSystemFont, Inter, system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("Ingen data", w / 2, h / 2);
+      if (canvas._chartOff) canvas._chartOff();
+      if (onScrub) onScrub(null);
+      return;
+    }
+    const padL = 8, padR = 12, padT = 16, padB = 24;
+    const { path, lo, hi, t0, t1 } = linePath(points, padL, padT, w - padR, h - padB, key);
+    const first = points[0][key];
+    const last = points[points.length - 1][key];
+    const up = last >= first;
+    const color = up ? COIN_GREEN : COIN_RED;
+    // light time labels only (Phantom-style: no heavy price axis)
+    grid(ctx, w, h, padL, padR, padT, padB, [null, null, null, null], xTicks(t0, t1, 4));
+    strokeArea(ctx, path, h - padB, color);
+    const end = path[path.length - 1];
+    ctx.beginPath();
+    ctx.arc(end.x, end.y, 3.4, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+
+    const span = Math.max(1, t1 - t0);
+    const markPts = [];
+    markers.forEach((m) => {
+      const t = +m.t;
+      if (t < t0 - span * 0.02 || t > t1 + span * 0.02) return;
+      const x = padL + ((t - t0) / span) * (w - padR - padL);
+      // place y on the path if possible, else at price
+      let y = null;
+      if (m.price != null && isFinite(+m.price) && hi !== lo) {
+        y = (h - padB) - ((+m.price - lo) / (hi - lo)) * ((h - padB) - padT);
+      }
+      if (y == null) {
+        let best = 0, bd = Infinity;
+        for (let i = 0; i < path.length; i++) {
+          const d = Math.abs(tOf(points[i], i, points.length) - t);
+          if (d < bd) { bd = d; best = i; }
+        }
+        y = path[best].y;
+      }
+      const buy = String(m.side || "").toLowerCase() === "buy";
+      const mc = buy ? COIN_GREEN : COIN_RED;
+      ctx.beginPath();
+      if (buy) {
+        ctx.moveTo(x, y - 7);
+        ctx.lineTo(x - 5.5, y + 3);
+        ctx.lineTo(x + 5.5, y + 3);
+      } else {
+        ctx.moveTo(x, y + 7);
+        ctx.lineTo(x - 5.5, y - 3);
+        ctx.lineTo(x + 5.5, y - 3);
+      }
+      ctx.closePath();
+      ctx.fillStyle = mc;
+      ctx.fill();
+      ctx.strokeStyle = "rgba(11,14,17,0.7)";
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
+      markPts.push({ x, y, m });
+    });
+
+    const tip = ensureTip(canvas);
+    const find = (ev) => {
+      const r = canvas.getBoundingClientRect();
+      const x = ev.clientX - r.left;
+      let best = 0, bd = Infinity;
+      for (let i = 0; i < path.length; i++) {
+        const d = Math.abs(path[i].x - x);
+        if (d < bd) { bd = d; best = i; }
+      }
+      return best;
+    };
+    const nearMark = (x) => {
+      let best = null, bd = 14;
+      for (const mp of markPts) {
+        const d = Math.abs(mp.x - x);
+        if (d < bd) { bd = d; best = mp.m; }
+      }
+      return best;
+    };
+    const clearXhair = () => {
+      // redraw without hair: cheap full redraw is fine for these series sizes
+    };
+    const show = (ev) => {
+      const i = find(ev);
+      const p = points[i];
+      const pt = path[i];
+      const r = canvas.getBoundingClientRect();
+      const mk = nearMark(pt.x);
+      const price = p[key];
+      const when = fmtTipTime(tOf(p, i, points.length), span);
+      if (tip) {
+        let html = `<b>${fmtTick(price, "usd")}</b><span>${when}</span>`;
+        if (mk) {
+          const lab = String(mk.side).toLowerCase() === "buy" ? "Köp" : "Sälj";
+          html += `<span>${lab}${mk.bot ? " · " + mk.bot : ""}${mk.reason ? " · " + String(mk.reason).slice(0, 80) : ""}</span>`;
+        }
+        tip.innerHTML = html;
+        tip.classList.add("on");
+        tip.style.left = Math.max(8, Math.min(r.width - 8, pt.x)) + "px";
+        tip.style.top = Math.max(8, pt.y - 8) + "px";
+      }
+      // vertical hair
+      const { ctx: c2, w: w2, h: h2 } = setup(canvas);
+      grid(c2, w2, h2, padL, padR, padT, padB, [null, null, null, null], xTicks(t0, t1, 4));
+      strokeArea(c2, path, h2 - padB, color);
+      c2.beginPath();
+      c2.arc(end.x, end.y, 3.4, 0, Math.PI * 2);
+      c2.fillStyle = color;
+      c2.fill();
+      markPts.forEach((mp) => {
+        const buy = String(mp.m.side || "").toLowerCase() === "buy";
+        const mc = buy ? COIN_GREEN : COIN_RED;
+        c2.beginPath();
+        if (buy) {
+          c2.moveTo(mp.x, mp.y - 7);
+          c2.lineTo(mp.x - 5.5, mp.y + 3);
+          c2.lineTo(mp.x + 5.5, mp.y + 3);
+        } else {
+          c2.moveTo(mp.x, mp.y + 7);
+          c2.lineTo(mp.x - 5.5, mp.y - 3);
+          c2.lineTo(mp.x + 5.5, mp.y - 3);
+        }
+        c2.closePath();
+        c2.fillStyle = mc;
+        c2.fill();
+      });
+      c2.save();
+      c2.strokeStyle = "rgba(234,236,239,0.55)";
+      c2.lineWidth = 1;
+      c2.setLineDash([3, 3]);
+      c2.beginPath();
+      c2.moveTo(pt.x, padT);
+      c2.lineTo(pt.x, h2 - padB);
+      c2.stroke();
+      c2.beginPath();
+      c2.moveTo(padL, pt.y);
+      c2.lineTo(w2 - padR, pt.y);
+      c2.stroke();
+      c2.restore();
+      c2.beginPath();
+      c2.arc(pt.x, pt.y, 4.2, 0, Math.PI * 2);
+      c2.fillStyle = "#EAECEF";
+      c2.fill();
+      c2.beginPath();
+      c2.arc(pt.x, pt.y, 2.4, 0, Math.PI * 2);
+      c2.fillStyle = color;
+      c2.fill();
+      if (onScrub) onScrub({ price, t: tOf(p, i, points.length), marker: mk, first, last });
+    };
+    const hide = () => {
+      if (tip) tip.classList.remove("on");
+      // restore unscoped chart
+      const keep = onScrub;
+      const o = Object.assign({}, opts, { onScrub: null });
+      // redraw base (avoid recursion via onScrub)
+      const { ctx: c2, w: w2, h: h2 } = setup(canvas);
+      grid(c2, w2, h2, padL, padR, padT, padB, [null, null, null, null], xTicks(t0, t1, 4));
+      strokeArea(c2, path, h2 - padB, color);
+      c2.beginPath();
+      c2.arc(end.x, end.y, 3.4, 0, Math.PI * 2);
+      c2.fillStyle = color;
+      c2.fill();
+      markPts.forEach((mp) => {
+        const buy = String(mp.m.side || "").toLowerCase() === "buy";
+        const mc = buy ? COIN_GREEN : COIN_RED;
+        c2.beginPath();
+        if (buy) {
+          c2.moveTo(mp.x, mp.y - 7);
+          c2.lineTo(mp.x - 5.5, mp.y + 3);
+          c2.lineTo(mp.x + 5.5, mp.y + 3);
+        } else {
+          c2.moveTo(mp.x, mp.y + 7);
+          c2.lineTo(mp.x - 5.5, mp.y - 3);
+          c2.lineTo(mp.x + 5.5, mp.y - 3);
+        }
+        c2.closePath();
+        c2.fillStyle = mc;
+        c2.fill();
+      });
+      if (keep) keep(null);
+    };
+    if (canvas._chartOff) canvas._chartOff();
+    canvas.addEventListener("pointerdown", show);
+    canvas.addEventListener("pointermove", show);
+    canvas.addEventListener("pointerleave", hide);
+    canvas.addEventListener("pointerup", hide);
+    canvas._chartOff = () => {
+      canvas.removeEventListener("pointerdown", show);
+      canvas.removeEventListener("pointermove", show);
+      canvas.removeEventListener("pointerleave", hide);
+      canvas.removeEventListener("pointerup", hide);
+    };
+  }
+
+  global.DeskCharts = { drawEquity, drawPrice, drawCoin };
 })(window);

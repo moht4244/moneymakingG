@@ -1262,3 +1262,136 @@ a.chat-card:active { opacity: 0.88; }
   display: flex; flex-direction: column; gap: 8px;
 }
 .req-alert-edit .req-input { height: 36px; font-size: 14px; }
+
+
+/* ----- v15.2 coin detail, trades, ranking, calendar, LIVE countdown ----- */
+.coin-page .coin-price { font-size: 36px; font-weight: 720; letter-spacing: -1.4px; margin: 2px 0 0; }
+.coin-page .chg .sub { font-weight: 550; }
+.coin-tf {
+  display: flex;
+  gap: 6px;
+  margin: 10px 0 0;
+  background: var(--elevated);
+  border: 1px solid var(--sep);
+  border-radius: 10px;
+  padding: 4px;
+}
+.tf-btn {
+  flex: 1;
+  height: 32px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--secondary);
+  letter-spacing: 0.02em;
+}
+.tf-btn.on {
+  background: var(--grouped);
+  color: var(--label);
+}
+.coin-chart { background: transparent; border-radius: 0; }
+.chart-wrap.coin-chart { margin-left: -4px; margin-right: -4px; }
+.ext-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 4px;
+}
+.ext-link {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  background: var(--grouped);
+  border: 1px solid var(--sep);
+  color: var(--label);
+  font-size: 12px;
+  font-weight: 650;
+}
+.ext-link:active { background: var(--fill); }
+.coin-chip {
+  display: inline-flex;
+  margin-top: 6px;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--gold-dim);
+  color: var(--gold);
+  font-size: 11px;
+  font-weight: 700;
+}
+.live-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  margin: 0 0 12px;
+  border-radius: 12px;
+  background: var(--elevated);
+  border: 1px solid var(--sep);
+}
+.live-chip .t {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: var(--gold);
+  color: #0B0E11;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+.live-chip .s { font-size: 13px; font-weight: 600; color: var(--label); }
+.live-clock .clock-days {
+  font-size: 40px;
+  font-weight: 720;
+  letter-spacing: -1.6px;
+  margin: 4px 0 2px;
+}
+.live-clock .clock-days span { font-size: 16px; font-weight: 600; color: var(--secondary); letter-spacing: 0; }
+.live-clock .clock-sub { font-size: 14px; color: var(--secondary); margin-bottom: 12px; }
+.rank-n { width: 28px; text-align: center; font-weight: 760; color: var(--gold); flex: none; }
+.cal-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 4px 0 12px;
+}
+.cal-month { font-size: 17px; font-weight: 700; text-transform: capitalize; }
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+.cal-wd {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--tertiary);
+  text-transform: uppercase;
+  padding: 4px 0;
+}
+.cal-cell {
+  aspect-ratio: 1;
+  border-radius: 8px;
+  background: var(--elevated);
+  border: 1px solid transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  color: var(--label);
+  min-height: 44px;
+}
+.cal-cell.empty { background: transparent; pointer-events: none; }
+.cal-cell.mute { color: var(--tertiary); }
+.cal-cell.up, .cal-cell.down { color: #fff; }
+.cal-cell.on { border-color: #EAECEF; }
+.cal-cell .d { font-size: 11px; font-weight: 650; opacity: 0.9; }
+.cal-cell .v { font-size: 10px; font-weight: 720; }
+.trade-row .row-sub b { color: var(--secondary); font-weight: 650; }
+.market-pair { display: block; color: inherit; }
+a.market-pair:active { opacity: 0.8; }
