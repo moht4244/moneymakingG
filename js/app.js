@@ -12,7 +12,6 @@
     rug_guard: "#FF9F0A",
     portfolio: "#0A84FF",
     reviewer: "#C7A068",
-    rug_guard: "#FF9F0A",
     regime: "#98989D",
     majors: "#FFB340",
     shadow: "#8E8E93",
@@ -47,19 +46,32 @@
     const n = name || "";
     return BOT_META[n] || { label: n || "Bot", emoji: "🤖" };
   }
-  const BOT_ORDER = [
-    "scanner", "analyst", "brain", "executor", "risk", "meme_test",
-    "research", "whale", "sentiment",
-    "rug_guard", "portfolio", "reviewer"
-  ];
   const BOT_GROUPS = [
     { title: "Kärnan", names: ["scanner", "analyst", "brain", "executor", "risk", "meme_test"] },
-    { title: "Marknaden", names: ["regime", "majors", "research", "whale", "sentiment"] },
+    { title: "Marknaden", names: ["regime", "majors", "assets", "research", "whale", "sentiment", "newsfeed", "social"] },
     { title: "Skydd & portfölj", names: ["rug_guard", "portfolio", "reviewer", "shadow", "telegram"] }
   ];
   const MAJORS = new Set(["SOL", "JUP", "JTO", "BONK", "WIF", "PYTH", "RAY"]);
   const LANE_LABELS = { memecoins: "Memecoins", majors: "Större coins", gold: "Guld", commodities: "Råvaror", stocks: "Aktier", assets: "Tillgångar", meme_test: "Meme-test" };
   const APP_NAME = "Moneymaking G";
+  const MOOD_LANE_KEY = "MMG_MOOD_LANE";
+  const LOCAL_REQ_KEY = "MMG_WATCH_REQUESTS";
+
+  function readSavedMoodLane() {
+    try { return localStorage.getItem(MOOD_LANE_KEY) || "memecoin"; } catch (_) { return "memecoin"; }
+  }
+  function saveMoodLane(lane) {
+    try { localStorage.setItem(MOOD_LANE_KEY, lane); } catch (_) {}
+  }
+  function readLocalRequests() {
+    try {
+      const arr = JSON.parse(localStorage.getItem(LOCAL_REQ_KEY) || "[]");
+      return Array.isArray(arr) ? arr : [];
+    } catch (_) { return []; }
+  }
+  function writeLocalRequests(arr) {
+    try { localStorage.setItem(LOCAL_REQ_KEY, JSON.stringify((arr || []).slice(0, 40))); } catch (_) {}
+  }
 
   const $app = document.getElementById("app");
   const state = {
@@ -76,23 +88,43 @@
     activityFilter: "all",
     liveBotFilter: "all",
     laneFilter: "all",
+    mktFilter: "all",
+    moodLane: readSavedMoodLane(),
+    moods: null,
+    universe: null,
+    requests: null,
+    reqFormType: "auto",
+    reqFormSym: "",
+    reqFormNote: "",
+    reqFormAbove: "",
+    reqFormBelow: "",
+    reqEditId: null,
+    reqBusy: false,
+    reqError: "",
+    liveQuotes: {},
+    quotesLoading: false,
+    bridgeOpen: false,
     chatter: null,
     coin: null,
     audit: null,
     bot: null,
+    lbPeriod: "vecka",
     toast: "",
     lightbox: false
   };
 
   function parseRoute() {
-    let h = (location.hash || "").replace(/^#/, "");
-    if (h.startsWith("t=")) h = "";
-    if (!h || h === "/") return { name: "home" };
-    const parts = h.replace(/^\//, "").split("/").filter(Boolean);
+    let hsh = (location.hash || "").replace(/^#/, "");
+    if (hsh.startsWith("t=")) hsh = "";
+    if (!hsh || hsh === "/") return { name: "home" };
+    const parts = hsh.replace(/^\//, "").split("/").filter(Boolean);
     const a = parts[0];
     if (a === "home") return { name: "home" };
+    if (a === "markets" || a === "marknad") return { name: "markets" };
+    if (a === "watch" || a === "bevaka" || a === "requests") return { name: "watch" };
     if (a === "activity" || a === "live" || a === "handelser") return { name: "live" };
-    if (a === "account") return { name: "account" };
+    if (a === "account" || a === "mer") return { name: "account" };
+    if (a === "awards" || a === "topplista") return { name: "awards" };
     if (a === "bots" && parts[1]) return { name: "bot", bot: decodeURIComponent(parts[1]) };
     if (a === "bots") return { name: "bots" };
     if (a === "coin" && parts[1]) return { name: "coin", mint: decodeURIComponent(parts[1]) };
@@ -162,7 +194,6 @@
     return "flat";
   }
 
-
   const CHART_RANGES = [["today", "Idag"], ["7d", "7 d"], ["30d", "30 d"], ["month", "Månad"], ["year", "År"], ["start", "Sedan start"]];
 
   function chartRangeButtons() {
@@ -192,7 +223,6 @@
   function sthlmStamp(ts) {
     const d = parseTs(ts);
     if (!d) return "";
-    const optsDate = { timeZone: "Europe/Stockholm", timeZoneName: undefined };
     const today = new Date().toLocaleDateString("sv-SE", { timeZone: "Europe/Stockholm" });
     const day = d.toLocaleDateString("sv-SE", { timeZone: "Europe/Stockholm" });
     if (day === today) return d.toLocaleTimeString("sv-SE", { timeZone: "Europe/Stockholm", hour: "2-digit", minute: "2-digit" });
@@ -223,6 +253,12 @@
     return String(sym || "?").slice(0, 3).toUpperCase();
   }
 
+  function hashHue(s) {
+    let x = 0;
+    for (let i = 0; i < s.length; i++) x = (x * 31 + s.charCodeAt(i)) >>> 0;
+    return x % 360;
+  }
+
   function tokenAvatar(symbol, mint, iconUrl) {
     const hue = hashHue(mint || symbol || "");
     const fb = `<div class="token-fallback" style="background:hsl(${hue} 32% 20%)">${h(initials(symbol))}</div>`;
@@ -247,9 +283,8 @@
     const totP = d.pnl_total_pct;
     const dayU = Number(d.pnl_today_usd || 0);
     const dayP = d.pnl_today_pct;
-    const paper = String((d.mode || "PAPER")).toUpperCase() !== "LIVE";
     return `<section class="hero">
-      <div class="hero-kicker">Värde${paper ? " · PAPER" : ""}</div>
+      <div class="hero-kicker">Totalt värde</div>
       <p class="hero-equity nums">${h(fmtUsd(d.equity_usd, { exact: true }))}</p>
       <div class="hero-pnl">
         ${pnlPill(totP)}
@@ -288,20 +323,6 @@
     </div>`;
   }
 
-  function tradePnlMeta(it) {
-    const sell = it && (it.kind === "sell" || it.kind === "stop" || it.kind === "sold" || it.kind === "stopped");
-    if (!it || (it.pnl_usd == null && it.pnl_pct == null)) return "";
-    if (!sell && it.pnl_usd == null) return "";
-    if (it.pnl_pct != null) return pnlStack(it.pnl_pct, it.pnl_usd);
-    return `<div class="chg ${chgClass(it.pnl_usd)} nums">${h(fmtUsd(it.pnl_usd, { exact: true }))}</div>`;
-  }
-
-  function hashHue(s) {
-    let x = 0;
-    for (let i = 0; i < s.length; i++) x = (x * 31 + s.charCodeAt(i)) >>> 0;
-    return x % 360;
-  }
-
   function laneOf(item) {
     if (!item) return null;
     const raw = String(item.lane || "").toLowerCase();
@@ -325,7 +346,7 @@
   }
 
   function laneFilterRow() {
-    const opts = [["all", "Alla"], ["memecoins", "Memecoins"], ["meme_test", "Meme-test"], ["majors", "Större coins"], ["gold", "Guld"]];
+    const opts = [["all", "Alla"], ["memecoins", "Memecoins"], ["meme_test", "Meme-test"], ["majors", "Större coins"], ["assets", "Tillgångar"]];
     return `<div class="filters lane-filters">
       ${opts.map(([id, lab]) => `<button type="button" data-lane="${id}" class="${state.laneFilter === id ? "on" : ""}">${lab}</button>`).join("")}
     </div>`;
@@ -333,10 +354,11 @@
 
   function svg(name) {
     const icons = {
-      home: '<svg viewBox="0 0 26 26" fill="currentColor"><path d="M12.2 3.2a1.3 1.3 0 0 1 1.6 0l8.2 6.6c.5.4.2 1.2-.4 1.2H20v9.1A1.9 1.9 0 0 1 18.1 22h-2.6a.9.9 0 0 1-.9-.9v-5.1h-3.2v5.1a.9.9 0 0 1-.9.9H8a1.9 1.9 0 0 1-1.9-1.9V11H4.4c-.6 0-.9-.8-.4-1.2l8.2-6.6z"/></svg>',
-      bots: '<svg viewBox="0 0 26 26" fill="currentColor"><path d="M13 3.2a1.3 1.3 0 0 1 1.3 1.3v1.1h3.2A3.3 3.3 0 0 1 20.8 8.9v2.1h.9a1.3 1.3 0 0 1 0 2.6h-.9v2.1a3.3 3.3 0 0 1-3.3 3.3h-3.2v1.2a1.3 1.3 0 1 1-2.6 0v-1.2H8.5a3.3 3.3 0 0 1-3.3-3.3v-2.1h-.9a1.3 1.3 0 0 1 0-2.6h.9V8.9A3.3 3.3 0 0 1 8.5 5.6h3.2V4.5A1.3 1.3 0 0 1 13 3.2zm-3.2 8.2a1.4 1.4 0 1 0 0 2.8 1.4 1.4 0 0 0 0-2.8zm6.4 0a1.4 1.4 0 1 0 0 2.8 1.4 1.4 0 0 0 0-2.8z"/></svg>',
-      activity: '<svg viewBox="0 0 26 26" fill="currentColor"><path d="M4.2 13a1.2 1.2 0 0 1 1.2-1.2h3.1l2-5.4a1.2 1.2 0 0 1 2.26.08L15.3 16l1.3-3.1a1.2 1.2 0 0 1 1.1-.7h3.1a1.2 1.2 0 1 1 0 2.4h-2.3l-2.1 5.1a1.2 1.2 0 0 1-2.26-.06L11.6 9.9l-1.2 3.2a1.2 1.2 0 0 1-1.12.7H5.4A1.2 1.2 0 0 1 4.2 13z"/></svg>',
-      account: '<svg viewBox="0 0 26 26" fill="currentColor"><path d="M13 3.2a5.2 5.2 0 1 1 0 10.4 5.2 5.2 0 0 1 0-10.4zM13 15c4.8 0 8.8 2.4 8.8 5.3v1.1c0 .7-.6 1.4-1.4 1.4H5.6c-.8 0-1.4-.7-1.4-1.4v-1.1C4.2 17.4 8.2 15 13 15z"/></svg>',
+      home: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>',
+      markets: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5M4 19h16"/><path d="m7 14 4-4 3 3 5-6"/></svg>',
+      activity: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+      watch: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/><path d="M11 8v6M8 11h6"/></svg>',
+      account: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M2 12h3M19 12h3M4.9 19.1 7 17M17 7l2.1-2.1"/></svg>',
       back: '<svg viewBox="0 0 12 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2L2 10l8 8"/></svg>',
       chev: '<svg class="chev" viewBox="0 0 8 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M1 1l6 6-6 6"/></svg>'
     };
@@ -354,9 +376,10 @@
     if (!active) return "";
     const tabs = [
       ["home", "Hem", "home"],
+      ["markets", "Marknad", "markets"],
       ["live", "Live", "activity"],
-      ["bots", "Botar", "bots"],
-      ["account", "Konto", "account"]
+      ["watch", "Bevaka", "watch"],
+      ["account", "Mer", "account"]
     ];
     return `<nav class="tabbar">${tabs.map(([id, label, icon]) => `
       <a class="tab ${active === id ? "on" : ""}" href="#/${id}" data-nav="#/${id}">
@@ -415,7 +438,7 @@
   }
 
   function buildLabel() {
-    const raw = String(window.MMG_BUILD || "").trim() || "v13-20261125";
+    const raw = String(window.MMG_BUILD || "").trim() || "v15-20261125";
     const m = raw.match(/^(v\d+)-(\d{4})(\d{2})(\d{2})$/);
     if (!m) return raw;
     const months = ["jan", "feb", "mars", "apr", "maj", "juni", "juli", "aug", "sep", "okt", "nov", "dec"];
@@ -435,8 +458,11 @@
       hhmm = String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
     }
     const ageMin = (Date.now() - d.getTime()) / 60000;
-    const banner = ageMin > 5 ? `<div class="stale-banner" role="status">Data är gammal</div>` : "";
-    return `${banner}<p class="freshness">Senast uppdaterad ${h(hhmm)}</p>`;
+    const stale = ageMin > 5;
+    return `<div class="freshness ${stale ? "stale" : ""}">
+      <span>Senast uppdaterad kl ${h(hhmm)}</span>
+      ${stale ? `<span class="stale-note"> · gammal data — dra ner för att uppdatera</span>` : ""}
+    </div>`;
   }
 
   function topbar(opts) {
@@ -444,9 +470,12 @@
     const left = o.back
       ? `<button class="back-btn" data-nav="${h(o.back)}">${svg("back")} ${h(o.backLabel || "Tillbaka")}</button>`
       : (o.left || "");
+    const titleHtml = o.brand
+      ? `<span class="mmg-brand"><span class="mmg-mark">G</span>${h(o.title || APP_NAME)}</span>`
+      : h(o.title || APP_NAME);
     return `<header class="topbar">
       <div class="left">${left}</div>
-      <h1>${h(o.title || APP_NAME)}</h1>
+      <h1>${titleHtml}</h1>
       <div class="right">${o.right || ""}</div>
     </header>`;
   }
@@ -470,7 +499,6 @@
       return "Något gick fel när appen skulle öppnas. Logga in igen och försök på nytt.";
     }
     if (!raw) return "Något gick fel när appen skulle öppnas. Logga in igen och försök på nytt.";
-    // Never show raw English browser errors (e.g. WebCrypto OperationError).
     if (/operation failed|OperationError|TypeError|not allowed|undefined|HTTP\s|failed for an operation/i.test(raw)
         || (/^[A-Za-z0-9 .,'’\-():]+$/.test(raw) && !/[åäöÅÄÖ]/.test(raw) && !/Inget hittades|Något gick fel|Fel kod/.test(raw))) {
       return "Något gick fel när appen skulle öppnas. Logga in igen och försök på nytt.";
@@ -500,87 +528,6 @@
     return `<div class="state"><div class="ico">—</div><h3>${h(title)}</h3><p>${h(body)}</p></div>`;
   }
 
-  /* ---------- screens ---------- */
-
-  // ---- greeting banner (Europe/Stockholm, live clock) ----
-  const TZ = "Europe/Stockholm";
-  function sthlmParts(now) {
-    const f = new Intl.DateTimeFormat("sv-SE", { timeZone: TZ, hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
-    const time = f.format(now);
-    const hour = Number(new Intl.DateTimeFormat("sv-SE", { timeZone: TZ, hour: "2-digit", hour12: false }).format(now));
-    const date = new Intl.DateTimeFormat("sv-SE", { timeZone: TZ, weekday: "long", day: "numeric", month: "long" }).format(now);
-    return { time, hour, date };
-  }
-  function greetingFor(hour) {
-    if (hour >= 5 && hour < 10) return "God morgon bossen ☕";
-    if (hour >= 10 && hour < 18) return "Tjena bossen 👑";
-    if (hour >= 18 && hour < 23) return "God kväll bossen 🌆";
-    return "Sent uppe, bossen? 🌙";
-  }
-  const FUN = {
-    record: ["Nytt rekord, bossen! 🏆", "Högsta värdet hittills – snyggt 📈", "Rekordnivå! Botarna är på hugget 🚀",
-             "Botarnas bästa läge hittills 🥇", "Ny topp – vi firar med en kaffe ☕", "Rekord! Men stop-lossen sitter kvar 🛡️",
-             "Toppen är nådd… för idag 😎", "Ny högstanivå – lugnt och metodiskt 🧠"],
-    bigGreen: ["Pengamaskinen rullar 💸", "Bossen vinner igen 👑", "Grön dag, glada botar 🍀", "Botarna är i form idag 💪",
-               "Det här är en riktigt bra dag 🌞", "Allt går åt rätt håll just nu 📈", "Snygg dag – men vi håller i reglerna 🧠",
-               "Kassan ler idag 😄", "Grönt så långt ögat når 🟢"],
-    smallGreen: ["Lite plus är också plus ✅", "Stadigt framåt 🐢", "Små steg uppåt 👣", "Lugnt och grönt 🌱",
-                 "Det tickar på i rätt riktning ⏱️", "Lite grönt i kanten 🍃", "Sakta men säkert 🧱", "Plus på kontot, lugn i magen 😌"],
-    flat: ["Botarna letar efter nästa coin 🔎", "Lugn dag – vi väntar på rätt läge 🎣", "Inga affärer än, bara bevakning 👀",
-           "Tålamod är också en strategi ⏳", "Radarn är på 📡", "Stilla vatten idag 🌊", "Vi köper bara när det känns rätt 🎯",
-           "Kaffe och koll ☕", "Inget hast, inget slarv 🧘"],
-    smallRed: ["Lite minus – helt normalt 🌦️", "Stop-lossen gjorde sitt jobb 🛡️", "En liten svacka, botarna håller koll 👀",
-               "Inte varje dag kan vara grön 🍂", "Små förluster, stora lärdomar 📚", "Vi tar en kaffe och väntar ut det ☕",
-               "Lugnt, reglerna gäller fortfarande 🧭", "Lite gråväder på marknaden ☁️"],
-    bigRed: ["Aj aj, marknaden är sur idag 🥶 men botarna håller koll", "Vi tar en kaffe och väntar ut det ☕",
-             "Stop-lossen gjorde sitt jobb 🛡️", "Tuff dag – skyddet är på 🧯", "Stormigt ute, botarna står kvar ⛈️",
-             "Lugnt, botarna håller koll 🛡️", "Andas – vi följer planen 🧘", "Regnet går över, reglerna står kvar 🌧️",
-             "Nu lär sig botarna något nytt 📚"],
-    paused: ["Paus i köpen – botarna vaktar det som redan finns 🛡️", "Vi sitter still en stund ⏸️", "Köpen vilar, skyddet jobbar 🧯",
-             "Andningspaus för botarna 🫁", "Säkerheten först – vi väntar ⏳", "Pausat, men inte sovande 👀",
-             "Ny chans kommer – just nu väntar vi 🕰️", "Lugn paus, inga nya köp 🧊"],
-  };
-  function funLine(d) {
-    if (!d) return "";
-    const eq = Number(d.equity_usd || 0);
-    const pnl = Number(d.pnl_today_usd || 0);
-    const pct = eq ? (100 * pnl) / Math.max(1, eq - pnl) : 0;
-    const m = d.market && d.market.regime;
-    let k = "flat";
-    if (d.entries_paused || m === "RED") k = "paused";
-    else if (d.record_high) k = "record";
-    else if (pct >= 3) k = "bigGreen";
-    else if (pnl > 0) k = "smallGreen";
-    else if (pct <= -3) k = "bigRed";
-    else if (pnl < 0) k = "smallRed";
-    const pool = FUN[k];
-    return pool[Math.floor(Date.now() / 180000) % pool.length]; // byts var 3:e minut
-  }
-  function greetingBanner(d) {
-    const p = sthlmParts(new Date());
-    return `<section class="greet" aria-live="off">
-      <div class="greet-top"><span class="greet-hi" id="greet-hi">${h(greetingFor(p.hour))}</span>
-      <span class="greet-clock nums" id="greet-clock">${h(p.time)}</span></div>
-      <div class="greet-sub"><span id="greet-date">${h(p.date)}</span><span class="greet-fun">${h(funLine(d))}</span></div>
-    </section>`;
-  }
-  function tickGreeting() {
-    const c = document.getElementById("greet-clock");
-    if (!c) return;
-    const p = sthlmParts(new Date());
-    c.textContent = p.time;
-    const hi = document.getElementById("greet-hi");
-    const g = greetingFor(p.hour);
-    if (hi && hi.textContent !== g) hi.textContent = g;
-    const dt = document.getElementById("greet-date");
-    if (dt && dt.textContent !== p.date) dt.textContent = p.date;
-    const fn = document.querySelector(".greet-fun");
-    const fl = funLine(state.desk);
-    if (fn && fl && fn.textContent !== fl) fn.textContent = fl;
-  }
-  setInterval(tickGreeting, 1000);
-
-
   const MOVERS_RANGE_SV = { today: "idag", "7d": "på 7 dagar", "30d": "på 30 dagar", month: "denna månad", year: "i år", start: "sedan start" };
 
   function assetLinkOf(item) {
@@ -594,7 +541,7 @@
     if (link && link.url) {
       return `<a class="${cls}" href="${h(link.url)}" target="_blank" rel="noopener"${attr}>${inner}</a>`;
     }
-    return `<div class="${cls}"${attr}>${inner}<div class="row-meta muted small">Ingen data än</div></div>`;
+    return `<div class="${cls}"${attr}>${inner}</div>`;
   }
 
   function openMarketBtn(item) {
@@ -603,33 +550,503 @@
     return `<a class="btn btn-primary" href="${h(link.url)}" target="_blank" rel="noopener">${h(link.button || ("Öppna på " + link.label))}</a>`;
   }
 
+  /* ---------- 1. HEM (Portfolio & Positions ONLY) ---------- */
+  function renderHome() {
+    const d = state.desk;
+    if (state.loading && !d) return skeleton();
+    if (state.error && !d) return errorView(state.error);
+    const laneF = state.laneFilter || "all";
+    const positions = (d.positions || []).filter((p) => matchesLane(p, laneF));
+    const lanes = d.lanes || null;
+    const eq = Number(d.equity_usd || 0);
+    const cash = Number(d.cash_usd || 0);
+    const inPlay = Number(d.positions_value_usd != null ? d.positions_value_usd : Math.max(0, eq - cash));
+    const resPct = eq > 0 ? Math.max(0, Math.round((cash / eq) * 100)) : 0;
+
+    return `${topbar({
+      title: APP_NAME,
+      brand: true,
+      left: pillPaperOrLive(d.mode),
+      right: `<span class="pill pill-muted"><span class="pill-dot pulse"></span>${h(d.schedule || "24/7")}</span>`
+    })}
+    <div class="screen"><div class="page">
+      ${window.DeskFun ? DeskFun.ticker(state.ticker && state.ticker.items) : ""}
+
+      <div class="hero-card">
+        ${heroPnlBlock(d)}
+        ${window.DeskFun && state.fun ? `<div style="margin-top:10px">${DeskFun.streakChip(state.fun.streak)}</div>` : ""}
+        <div class="portfolio-strip">
+          <div class="p-stat"><div class="k">Kassa</div><div class="v nums">${h(fmtUsd(cash, { exact: true }))}</div></div>
+          <div class="p-stat"><div class="k">I spel</div><div class="v nums">${h(fmtUsd(inPlay, { exact: true }))}</div></div>
+          <div class="p-stat"><div class="k">Reserv</div><div class="v nums">${h(resPct)}%</div></div>
+        </div>
+      </div>
+
+      <div class="segments segments-scroll" data-role="chart-range">
+        ${chartRangeButtons()}
+      </div>
+      ${chartSummary(state.chart)}
+      <div class="chart-wrap"><canvas id="equity-chart"></canvas></div>
+
+      ${lanePnlCard(lanes)}
+
+      ${laneFilterRow()}
+      <div class="card">
+        <div class="card-h">Öppna positioner <span class="tiny">${positions.length} st</span></div>
+        ${positions.length ? positions.map((p) => assetRow(p, `
+            ${tokenAvatar(p.symbol, p.mint, p.icon_url)}
+            <div class="row-body">
+              <div class="row-title">${h(p.symbol)}${laneChip(laneOf(p))}</div>
+              <div class="row-sub">${h(p.name || "")}${p.name ? " · " : ""}entry ${h(fmtUsd(p.entry_usd))}</div>
+            </div>
+            <div class="row-meta">
+              <div class="asset-val nums">${h(fmtUsd(p.value_usd || p.size_usd, { exact: true }))}</div>
+              ${pnlStack(p.pnl_pct, p.pnl_usd)}
+            </div>
+            ${assetLinkOf(p) ? svg("chev") : ""}`, "row has-avatar asset-row", "")).join("") : `<div class="state" style="padding:26px 16px"><p>Inga öppna positioner i valt spår.</p></div>`}
+      </div>
+    </div></div>`;
+  }
+
+  /* ---------- 2. MARKNAD (Moods per lane, Regime, Movers, Universe) ---------- */
   function moversCard() {
     const side = state.moversSide === "worst" ? "worst" : "best";
     const raw = ((state.movers && state.movers.items) || []).filter((x) => x && x.change_pct != null);
-    const items = (side === "worst" ? raw.slice().sort((a, b) => a.change_pct - b.change_pct) : raw.slice().sort((a, b) => b.change_pct - a.change_pct)).slice(0, 4);
+    const items = (side === "worst" ? raw.slice().sort((a, b) => a.change_pct - b.change_pct) : raw.slice().sort((a, b) => b.change_pct - a.change_pct)).slice(0, 6);
     const rng = (state.movers && state.movers.range) || state.chartRange || "today";
     const lab = MOVERS_RANGE_SV[rng] || "perioden";
-    const rows = items.length ? items.map((c) => assetRow(c, `
-        <div class="row-body">
-          <div class="row-title">${h(c.symbol)}${c.held ? " 💼" : ""}</div>
-          <div class="row-sub nums">${h(fmtUsd(c.price, { exact: true }))} · ${h(lab)}</div>
+    const rows = items.length ? items.map((c) => {
+      const link = assetLinkOf(c);
+      const symCell = link && link.url
+        ? `<a href="${h(link.url)}" target="_blank" rel="noopener">${h(c.symbol)}${c.held ? " 💼" : ""}</a>`
+        : `${h(c.symbol)}${c.held ? " 💼" : ""}`;
+      return `<div class="mkt-row">
+        <div class="mkt-info">
+          <div class="mkt-sym">${symCell}</div>
+          <div class="mkt-sub nums">${h(lab)}</div>
         </div>
-        <div class="row-meta">
-          <div class="chg ${chgClass(c.change_pct)} nums">${h(fmtPct(c.change_pct))}</div>
+        <div class="mkt-px nums">${h(fmtUsd(c.price, { exact: true }))}</div>
+        <div class="mkt-act">
+          ${pnlPill(c.change_pct)}
+          <button type="button" class="mkt-add-btn" data-quick-watch="${h(c.symbol)}" data-quick-mint="${h(c.mint || "")}" data-quick-type="crypto" title="Be botarna kolla">+Koll</button>
         </div>
-        ${assetLinkOf(c) ? svg("chev") : ""}`, "row has-avatar")).join("") : `<div class="state" style="padding:20px 16px"><p>Inga coins att jämföra för den här perioden än.</p></div>`;
+      </div>`;
+    }).join("") : `<div class="state" style="padding:20px 16px"><p>Inga coins att jämföra för den här perioden än.</p></div>`;
     return `<div class="card" id="movers-card">
-      <div class="card-h">Topp 4 coins
-        <div class="segments" data-role="movers-side">
+      <div class="card-h">Top Movers
+        <div class="segments" data-role="movers-side" style="margin:0;width:140px">
           <button type="button" data-movers="best" class="${side === "best" ? "on" : ""}">Bästa</button>
           <button type="button" data-movers="worst" class="${side === "worst" ? "on" : ""}">Sämsta</button>
         </div>
       </div>
+      ${items.length ? `<div class="mkt-table-head"><span class="h-name">Coin</span><span class="h-px">Pris</span><span class="h-chg">Utv · Koll</span></div>` : ""}
       ${rows}
     </div>`;
   }
 
+  function universeCategoryKind(cat) {
+    const c = String(cat || "").toLowerCase();
+    if (["gold", "silver", "oil", "copper", "natgas", "platinum", "palladium", "commodity"].includes(c)) return "commodities";
+    if (["equity", "index", "etf", "gold_miners", "fx", "stocks"].includes(c)) return "stocks";
+    return "crypto";
+  }
 
+  function renderMarkets() {
+    const d = state.desk;
+    if (state.loading && !d) return `${topbar({ title: "Marknad" })}${skeleton()}`;
+    if (state.error && !d) return errorView(state.error);
+    const regimeRaw = (d && d.market && d.market.regime) || "GREEN";
+    const regime = ({ GREEN: "RISK_ON", QUIET: "CAUTION", RED: "RISK_OFF" })[regimeRaw] || regimeRaw;
+    const regimeLabel = regime === "RISK_OFF" ? "RÖTT · inga nya köp" : regime === "CAUTION" ? "LUGNT · max 1 position" : "GRÖNT · köper som vanligt";
+    const regimeCls = regime === "RISK_OFF" ? "off" : regime === "CAUTION" ? "caution" : "on";
+    const btc = (d && d.market && d.market.btc) || {};
+    const sol = (d && d.market && d.market.sol) || {};
+
+    const uniRaw = (state.universe && state.universe.items) || [];
+    const perpsRaw = (state.universe && state.universe.perps) || [];
+    const majorsRaw = ((d && d.positions) || []).filter((p) => laneOf(p) === "majors");
+    const mktItems = [];
+    const seenSym = new Set();
+    uniRaw.forEach((u) => {
+      if (!u || !u.symbol || seenSym.has(u.symbol)) return;
+      seenSym.add(u.symbol);
+      mktItems.push({
+        symbol: u.symbol,
+        name: u.name || u.category || "",
+        category: u.category || "crypto",
+        kind: universeCategoryKind(u.category),
+        venue: u.venue || "solana",
+        mint: u.mint || "",
+        price: u.price
+      });
+    });
+    perpsRaw.forEach((p) => {
+      if (!p || !p.symbol || seenSym.has(p.symbol)) return;
+      seenSym.add(p.symbol);
+      mktItems.push({
+        symbol: p.symbol,
+        name: p.market || p.category || "",
+        category: p.category || "equity",
+        kind: universeCategoryKind(p.category),
+        venue: "hyperliquid",
+        mint: "",
+        price: p.mark_price
+      });
+    });
+    majorsRaw.forEach((m) => {
+      if (!m || !m.symbol || seenSym.has(m.symbol)) return;
+      seenSym.add(m.symbol);
+      mktItems.push({
+        symbol: m.symbol,
+        name: m.name || "Major coin",
+        category: "majors",
+        kind: "crypto",
+        venue: "solana",
+        mint: m.mint || "",
+        price: m.mark_usd
+      });
+    });
+    const mktF = state.mktFilter || "all";
+    const filteredMkt = mktItems.filter((x) => mktF === "all" || x.kind === mktF).slice(0, 30);
+    const mktFilters = [["all", "Alla"], ["crypto", "Crypto"], ["commodities", "Guld & Råvaror"], ["stocks", "Aktier"]];
+
+    return `${topbar({ title: "Marknad", right: pillPaperOrLive(d && d.mode) })}
+    <div class="screen"><div class="page">
+      ${window.DeskFun && DeskFun.moodLanes ? DeskFun.moodLanes(state.moods, state.moodLane) : ""}
+
+      <div class="card market-card">
+        <div class="regime">
+          <div>
+            <div class="tiny">Marknadsläge</div>
+            <div class="regime-name ${regimeCls}">${h(regimeLabel)}</div>
+          </div>
+        </div>
+        <div class="market-grid">
+          <div class="market-pair">
+            <div class="k">BTC</div>
+            <div class="v nums">${h(fmtUsd(btc.price, { exact: true }))}
+              <span class="chg ${chgClass(btc.change_24h_pct)}">${h(fmtPct(btc.change_24h_pct))}</span>
+            </div>
+          </div>
+          <div class="market-pair">
+            <div class="k">SOL</div>
+            <div class="v nums">${h(fmtUsd(sol.price, { exact: true }))}
+              <span class="chg ${chgClass(sol.change_24h_pct)}">${h(fmtPct(sol.change_24h_pct))}</span>
+            </div>
+          </div>
+        </div>
+        ${d && d.market && d.market.news ? `<div class="market-note">${h(d.market.news)}</div>` : ""}
+      </div>
+
+      ${moversCard()}
+
+      <div class="card">
+        <div class="card-h">Godkända marknader <a class="link" href="#/watch" data-nav="#/watch">Begär ny ›</a></div>
+        <div class="filters" style="padding-top:0">
+          ${mktFilters.map(([id, lab]) => `<button type="button" data-mkt-filter="${id}" class="${mktF === id ? "on" : ""}">${h(lab)}</button>`).join("")}
+        </div>
+        ${filteredMkt.length ? filteredMkt.map((item) => {
+          const reqType = item.kind === "stocks" ? "stock" : item.kind === "commodities" ? "commodity" : "crypto";
+          const link = assetLinkOf(item);
+          return `<div class="mkt-row">
+            <div class="mkt-info">
+              <div class="mkt-sym">${link && link.url ? `<a href="${h(link.url)}" target="_blank" rel="noopener">${h(item.symbol)}</a>` : h(item.symbol)} <span class="lane lane-assets">${h(item.category)}</span></div>
+              <div class="mkt-sub">${h(item.name || item.venue)} · ${h(item.venue)}</div>
+            </div>
+            <div class="mkt-px nums">${item.price != null ? h(fmtUsd(item.price, { exact: true })) : "—"}</div>
+            <div class="mkt-act">
+              <button type="button" class="mkt-add-btn" data-quick-watch="${h(item.symbol)}" data-quick-mint="${h(item.mint || "")}" data-quick-type="${reqType}">+Bevaka</button>
+            </div>
+          </div>`;
+        }).join("") : `<div class="state" style="padding:22px 16px"><p>Inga godkända marknader i denna kategori just nu.</p></div>`}
+      </div>
+    </div></div>`;
+  }
+
+  /* ---------- 3. BEVAKA (Live Coin & Stock Tracker + Price Alerts) ---------- */
+  function reqStatusLabel(st) {
+    return ({
+      pending: "Väntar",
+      watching: "Bevakas",
+      evaluated: "Kollad",
+      rejected: "Ej i auto",
+      local: "Lokal kö"
+    })[st] || st || "Väntar";
+  }
+
+  function reqTypeLabel(t) {
+    return ({ auto: "Auto", crypto: "Coin", stock: "Aktie", commodity: "Guld/Råvara" })[t] || t;
+  }
+
+  function mergedWatchItems() {
+    const remoteItems = (state.requests && state.requests.items) || [];
+    const localItems = readLocalRequests();
+    const merged = [];
+    const seenKeys = new Set();
+    remoteItems.forEach((r) => {
+      const k = (r.mint || r.symbol || "").toUpperCase();
+      if (k) seenKeys.add(k);
+      merged.push(Object.assign({ origin: "server" }, r));
+    });
+    localItems.forEach((r) => {
+      const k = (r.mint || r.symbol || "").toUpperCase();
+      if (k && seenKeys.has(k)) return;
+      merged.push(Object.assign({ origin: "local", status: "local" }, r));
+    });
+    return merged;
+  }
+
+  function quoteForWatchItem(r) {
+    const qMap = state.liveQuotes || {};
+    const m = r.mint || r.resolved_mint;
+    const sym = String(r.symbol || "").toUpperCase();
+    const live = (m && qMap["M:" + m]) || qMap["S:" + sym] || null;
+    if (live && live.price != null) return live;
+    if (r.price != null) return { price: r.price, change_24h: r.change_24h, source: r.quote_source || "snapshot" };
+    return null;
+  }
+
+  function renderWatch() {
+    const d = state.desk || {};
+    if (state.loading && !state.desk) return `${topbar({ title: "Bevaka" })}${skeleton()}`;
+    const merged = mergedWatchItems();
+    const canWrite = !!(DeskAPI.canWriteRemote && DeskAPI.canWriteRemote());
+    const watching = (state.requests && state.requests.watching) || d.watching || [];
+    const picks = d.copy_picks || [];
+    const types = [["auto", "Auto"], ["crypto", "Coin"], ["stock", "Aktie"], ["commodity", "Guld & Råvara"]];
+    const quick = [["BTC", "crypto"], ["ETH", "crypto"], ["SOL", "crypto"], ["BONK", "crypto"], ["NVDA", "stock"], ["TSLA", "stock"], ["AAPL", "stock"], ["PAXG", "commodity"], ["SLVx", "commodity"]];
+
+    return `${topbar({ title: "Bevaka", right: pillPaperOrLive(d.mode) })}
+    <div class="screen"><div class="page">
+      <div class="card">
+        <div class="card-h">Lägg till coin eller aktie i bevakningen</div>
+        <form class="req-form" data-req-form>
+          <div class="req-quick">
+            <span class="tiny">Snabbval:</span>
+            ${quick.map(([sym, tp]) => `<button type="button" class="req-quick-chip" data-fill-sym="${sym}" data-fill-type="${tp}">${sym}</button>`).join("")}
+          </div>
+          <input class="req-input" type="text" name="symbol" value="${h(state.reqFormSym)}" placeholder="Ticker eller Solana-mint (t.ex. BTC, SOL, NVDA)" autocomplete="off" spellcheck="false">
+          <div class="req-type-row">
+            ${types.map(([id, lab]) => `<button type="button" class="req-type-btn ${state.reqFormType === id ? "on" : ""}" data-req-type="${id}">${lab}</button>`).join("")}
+          </div>
+          <div class="req-alert-grid">
+            <input class="req-input" type="number" step="any" min="0" inputmode="decimal" name="alert_above" value="${h(state.reqFormAbove)}" placeholder="Prislarm över ($)">
+            <input class="req-input" type="number" step="any" min="0" inputmode="decimal" name="alert_below" value="${h(state.reqFormBelow)}" placeholder="Prislarm under ($)">
+          </div>
+          <input class="req-input" type="text" name="note" value="${h(state.reqFormNote)}" placeholder="Valfri kommentar (t.ex. Kolla volym / rapport)" autocomplete="off">
+          ${state.reqError ? `<div class="lock-error" style="margin:0;text-align:left">${h(state.reqError)}</div>` : ""}
+          <button type="submit" class="btn btn-gold" style="margin:2px 0 0" ${state.reqBusy ? "disabled" : ""}>${state.reqBusy ? "Sparar…" : "Lägg till & begär koll"}</button>
+          <div class="tiny" style="line-height:1.4">Livepris & 24h-utveckling visas nedan. Prislarm skickas direkt via Telegram enligt din larmregel. Botar använder listan som mjuk signal (säkerhetsregler går alltid först).</div>
+          ${!canWrite ? `<div class="req-hint-box">På GitHub Pages sparas nya bevakningar lokalt med livepris här i appen. För 24/7 Telegram-prislarm och bot-koll: koppla <b>API-brygga</b> under Mer eller tryck <b>Kopiera</b> nedan.</div>` : ""}
+        </form>
+      </div>
+
+      <div class="card">
+        <div class="card-h">
+          <span>Bevakade coins & aktier <span class="tiny">(${merged.length} st)</span></span>
+          <button type="button" class="btn-small" data-refresh-quotes ${state.quotesLoading ? "disabled" : ""}>${state.quotesLoading ? "Uppdaterar…" : "↻ Priser"}</button>
+        </div>
+        ${merged.length ? merged.map((r) => {
+          const st = r.status || "pending";
+          const q = quoteForWatchItem(r);
+          const pxStr = q && q.price != null ? fmtUsd(q.price, { exact: true }) : "—";
+          const chg = q && q.change_24h != null ? Number(q.change_24h) : null;
+          const isEditing = String(state.reqEditId || "") === String(r.id);
+          const alertText = [
+            r.alert_above != null ? `över $${r.alert_above}` : "",
+            r.alert_below != null ? `under $${r.alert_below}` : ""
+          ].filter(Boolean).join(" / ");
+          const copyText = `Bevaka ${r.symbol} (${reqTypeLabel(r.asset_type)})${alertText ? " larm " + alertText : ""}${r.note ? ": " + r.note : ""}`;
+          const link = assetLinkOf({ symbol: r.symbol, mint: r.mint || r.resolved_mint, venue: r.asset_type === "stock" ? "hyperliquid" : "solana" });
+          return `<div class="req-item">
+            <div class="req-top">
+              <div>
+                <div class="req-sym">${link && link.url ? `<a href="${h(link.url)}" target="_blank" rel="noopener">${h(r.symbol)}</a>` : h(r.symbol)} <span class="lane lane-assets">${h(reqTypeLabel(r.asset_type))}</span> <span class="req-status ${h(st)}">${h(reqStatusLabel(st))}</span></div>
+              </div>
+              <div class="req-px-box">
+                <div class="req-px-val nums">${h(pxStr)}</div>
+                <div>${chg != null ? `<span class="pnl-pill ${chgClass(chg)} nums">${h(fmtPct(chg))}</span>` : `<span class="tiny">24h —</span>`}</div>
+              </div>
+            </div>
+            ${(r.alert_above != null || r.alert_below != null || r.alert_triggered_at) ? `<div class="req-alert-row">
+              ${r.alert_above != null ? `<span class="req-alert-pill">🔔 Över ${h(fmtUsd(r.alert_above, { exact: true }))}</span>` : ""}
+              ${r.alert_below != null ? `<span class="req-alert-pill">🔔 Under ${h(fmtUsd(r.alert_below, { exact: true }))}</span>` : ""}
+              ${r.alert_triggered_at ? `<span class="req-alert-pill hit">🚨 Utlöst ${h(sthlmStamp(r.alert_triggered_at))}</span>` : ""}
+            </div>` : ""}
+            ${r.note ? `<div class="row-sub" style="margin-top:4px;white-space:normal">Din notis: ${h(r.note)}</div>` : ""}
+            ${r.bot_reply ? `<div class="req-reply">${r.bot_name ? `<b>${h(botMeta(r.bot_name).label)}:</b> ` : ""}${h(r.bot_reply)}</div>` : ""}
+            ${isEditing ? `<form class="req-alert-edit" data-edit-alert-form="${h(r.id)}" data-req-origin="${h(r.origin || "server")}">
+              <div class="req-alert-grid">
+                <input class="req-input" type="number" step="any" min="0" inputmode="decimal" name="alert_above" value="${r.alert_above != null ? h(r.alert_above) : ""}" placeholder="Över ($)">
+                <input class="req-input" type="number" step="any" min="0" inputmode="decimal" name="alert_below" value="${r.alert_below != null ? h(r.alert_below) : ""}" placeholder="Under ($)">
+              </div>
+              <div class="req-actions" style="justify-content:flex-end">
+                <button type="button" class="btn-small" data-toggle-alert-edit="">Avbryt</button>
+                <button type="submit" class="btn-small gold">Spara larm</button>
+              </div>
+            </form>` : ""}
+            <div class="req-meta">
+              <span>${h(sthlmStamp((q && q.ts) || r.quote_ts || r.updated_at || r.created_at) || "nyss")}${r.score != null ? ` · Betyg ${Math.round(r.score)}` : ""}</span>
+              <div class="req-actions">
+                <button type="button" class="btn-small" data-toggle-alert-edit="${h(r.id)}">🔔 Larm</button>
+                ${r.origin === "local" ? `<button type="button" class="btn-small gold" data-copy-req="${h(copyText)}">Kopiera</button>` : ""}
+                <button type="button" class="btn-small" data-del-req="${h(r.id)}" data-req-origin="${h(r.origin || "server")}">Ta bort</button>
+              </div>
+            </div>
+          </div>`;
+        }).join("") : `<div class="state" style="padding:24px 16px"><p>Inga bevakningar än. Lägg till en coin eller aktie ovan för att se livepris, 24h % och sätta prislarm.</p></div>`}
+      </div>
+
+      ${watching.length ? `<div class="card">
+        <div class="card-h">Botarnas aktiva bevakning</div>
+        ${watching.map((w) => assetRow(w, `
+            ${tokenAvatar(w.symbol, w.mint)}
+            <div class="row-body">
+              <div class="row-title">${h(w.symbol)}${laneChip(laneOf(w))}</div>
+              <div class="row-sub">${h(w.reason || w.name || "")}</div>
+            </div>
+            <div class="row-meta"><div class="tiny">${w.score != null ? "Score " + h(w.score) : ""}</div></div>
+            ${assetLinkOf(w) ? svg("chev") : ""}`, "row has-avatar")).join("")}
+      </div>` : ""}
+
+      ${picks.length ? `<div class="card">
+        <div class="card-h">Whale-tips</div>
+        ${picks.map((c) => `
+          <div class="row">
+            <div class="row-body">
+              <div class="row-title">${h(c.label)}</div>
+              <div class="row-sub">${h(c.last || shortAddr(c.wallet))}</div>
+            </div>
+          </div>`).join("")}
+      </div>` : ""}
+    </div></div>`;
+  }
+
+  /* ---------- 4. LIVE (Bot-to-Bot Q&A & Activity) ---------- */
+  function liveChatItems() {
+    const out = [];
+    const seen = new Set();
+    const push = (it) => {
+      if (!it) return;
+      const text = (it.text || it.title || it.body || "").trim();
+      if (!text) return;
+      const rawId = String(it.id != null ? it.id : "").replace(/^[ae]:/, "");
+      const bot = it.from_bot || it.bot;
+      const id = rawId || (bot + "|" + text + "|" + (it.ts || ""));
+      if (seen.has(id) || seen.has(bot + "|" + text)) return;
+      seen.add(id);
+      seen.add(bot + "|" + text);
+      out.push({
+        id, ts: it.ts, kind: (it.kind || "system"),
+        from_bot: bot, to_bot: it.to_bot, text,
+        thread_id: it.thread_id, mint: it.mint, symbol: it.symbol, lane: it.lane,
+        pnl_usd: it.pnl_usd, pnl_pct: it.pnl_pct
+      });
+    };
+    ((state.chatter && state.chatter.items) || []).forEach(push);
+    ((state.live && state.live.items) || []).forEach(push);
+    if (!out.length) {
+      ((state.activity && state.activity.items) || []).forEach(push);
+      ((state.fun && state.fun.chat) || []).forEach(push);
+    }
+    return out;
+  }
+
+  function liveKindMatch(kind, filter) {
+    const k = String(kind || "").toLowerCase();
+    if (!filter || filter === "all") return true;
+    if (filter === "chat") return k === "question" || k === "answer" || k === "checkin" || k === "decision";
+    if (filter === "trades") return k === "buy" || k === "sell" || k === "bought" || k === "sold" || k === "decision";
+    if (filter === "blocks") return k === "block" || k === "stop" || k === "stopped" || k === "rejected" || k === "guard";
+    return true;
+  }
+
+  function liveKindTag(kind) {
+    return ({
+      question: "frågar", answer: "svarar", checkin: "koll", decision: "beslut",
+      buy: "köp", sell: "sälj", stop: "stopp", block: "stopp", news: "nyhet"
+    })[kind] || "";
+  }
+
+  function renderLiveMsg(it, reply) {
+    const meta = botMeta(it.from_bot);
+    const to = it.to_bot ? botMeta(it.to_bot).label : "";
+    const tag = liveKindTag(it.kind);
+    const who = to ? `${meta.label} → ${to}` : meta.label;
+    const cls = `msg${reply ? " reply" : ""}${it.kind ? " k-" + h(it.kind) : ""}`;
+    return `<div class="${cls}" data-bot="${h(it.from_bot || "")}">
+      <span class="av" title="${h(meta.label)}">${meta.emoji}</span>
+      <div class="bubble">
+        <div class="who"><span class="who-name">${h(who)}</span>${tag ? `<span class="kind-tag">${h(tag)}</span>` : ""}<span class="when">${h(sthlmStamp(it.ts) || relTime(it.ts) || "")}</span></div>
+        <div class="bubble-text">${h(it.text)}</div>
+        ${it.pnl_usd != null && (it.kind === "sell" || it.kind === "stop") ? `<div class="chg ${chgClass(it.pnl_usd)} nums">${h(fmtUsd(it.pnl_usd, { exact: true }))}</div>` : ""}
+      </div>
+    </div>`;
+  }
+
+  function renderLive() {
+    const raw = liveChatItems();
+    if (state.loading && !raw.length) return `${topbar({ title: "Live" })}${skeleton()}`;
+    if (state.error && !raw.length) return errorView(state.error);
+    const filtered = raw.filter((it) => liveKindMatch(it.kind, state.activityFilter))
+      .filter((it) => !state.liveBotFilter || state.liveBotFilter === "all" || it.from_bot === state.liveBotFilter || it.to_bot === state.liveBotFilter)
+      .slice()
+      .sort((x, y) => {
+        const ta = parseTs(x && x.ts), tb = parseTs(y && y.ts);
+        return (ta ? ta.getTime() : 0) - (tb ? tb.getTime() : 0);
+      });
+    const bots = [];
+    const seen = new Set();
+    raw.forEach((it) => {
+      const b = it.from_bot;
+      if (b && !seen.has(b)) { seen.add(b); bots.push(b); }
+    });
+    const order = ["newsfeed", "social", "analyst", "scanner", "whale", "risk", "meme_test", "majors", "assets"];
+    bots.sort((a, b) => {
+      const ia = order.indexOf(a), ib = order.indexOf(b);
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b);
+    });
+    const kindFilters = [["all", "Alla"], ["chat", "Snack"], ["trades", "Affärer"]];
+    const botChips = [["all", "Alla botar"], ...bots.map((b) => [b, botMeta(b).emoji + " " + botMeta(b).label])];
+    const threads = new Map();
+    const blocks = [];
+    filtered.forEach((it) => {
+      if (it.thread_id) {
+        if (!threads.has(it.thread_id)) {
+          const list = [];
+          threads.set(it.thread_id, list);
+          blocks.push({ type: "thread", id: it.thread_id, list });
+        }
+        threads.get(it.thread_id).push(it);
+      } else {
+        blocks.push({ type: "msg", it });
+      }
+    });
+    const html = blocks.map((b) => {
+      if (b.type === "msg") return renderLiveMsg(b.it, false);
+      const list = b.list.slice().sort((x, y) => {
+        const rank = (k) => k === "question" ? 0 : k === "answer" ? 1 : k === "decision" ? 2 : 3;
+        const d = rank(x.kind) - rank(y.kind);
+        if (d) return d;
+        const ta = parseTs(x.ts), tb = parseTs(y.ts);
+        return (ta ? ta.getTime() : 0) - (tb ? tb.getTime() : 0);
+      });
+      return `<div class="thread">${list.map((it, i) => renderLiveMsg(it, i > 0)).join("")}</div>`;
+    }).join("");
+    return `${topbar({ title: "Live", right: pillPaperOrLive(state.desk && state.desk.mode) })}
+    <div class="screen"><div class="page live-page">
+      <p class="live-lead">Botarna frågar varandra och svarar med riktig data. Uppdateras varje minut.</p>
+      <div class="filters">
+        ${kindFilters.map(([id, lab]) => `<button data-filter="${id}" class="${state.activityFilter === id ? "on" : ""}">${lab}</button>`).join("")}
+      </div>
+      <div class="filters bot-filters">
+        ${botChips.map(([id, lab]) => `<button data-bot-filter="${h(id)}" class="${(state.liveBotFilter || "all") === id ? "on" : ""}">${h(lab)}</button>`).join("")}
+      </div>
+      ${filtered.length ? `<div class="live-chat" id="chat-feed">${html}</div>` : emptyView("Inget snack än", "När botarna kollar läget eller frågar varandra syns det här.")}
+    </div></div>`;
+  }
+
+  /* ---------- 5. MER / KONTO, BOTAR, REGLER, AWARDS, COIN, AUDIT ---------- */
   function riskMeter(risk) {
     if (!risk || (!risk.daily && !risk.drawdown && !risk.weekly)) return "";
     const daily = risk.daily || {};
@@ -655,7 +1072,7 @@
       : weekly.half_size ? "Botarna handlar med halv storlek den här veckan."
       : "Allt rullar inom taken.";
     return `<div class="card" id="risk-meter">
-      <div class="card-h">Risk</div>
+      <div class="card-h">Riskmätare</div>
       <div class="risk-rows">
         <div class="risk-row">
           <div class="risk-lab">Idag <span class="nums">${h(fmtPct(daily.pnl_pct))} av ${h(fmtPct(-(daily.limit_pct || 5)))}</span></div>
@@ -674,126 +1091,163 @@
     </div>`;
   }
 
-  function renderHome() {
+  function renderAccount() {
     const d = state.desk;
-    if (state.loading && !d) return skeleton();
-    if (state.error && !d) return errorView(state.error);
-    const pnl = d.pnl_today_usd || 0;
-    const regimeRaw = (d.market && d.market.regime) || "GREEN";
-    const regime = ({ GREEN: "RISK_ON", QUIET: "CAUTION", RED: "RISK_OFF" })[regimeRaw] || regimeRaw;
-    const regimeLabel = regime === "RISK_OFF" ? "RÖTT · inga nya köp" : regime === "CAUTION" ? "LUGNT · max 1 position" : "GRÖNT · köper som vanligt";
-    const regimeCls = regime === "RISK_OFF" ? "off" : regime === "CAUTION" ? "caution" : "on";
-    const btc = (d.market && d.market.btc) || {};
-    const sol = (d.market && d.market.sol) || {};
-    const laneF = state.laneFilter || "all";
-    const positions = (d.positions || []).filter((p) => matchesLane(p, laneF));
-    const watching = (d.watching || []).filter((w) => matchesLane(w, laneF));
-    const picks = d.copy_picks || [];
-    const botList = d.bots || [];
-    const byName = Object.fromEntries(botList.map((b) => [b.name, b]));
-    const lanes = d.lanes || null;
-
-    return `${topbar({
-      title: APP_NAME,
-      left: pillPaperOrLive(d.mode),
-      right: `<span class="pill pill-muted"><span class="pill-dot pulse"></span>${h(d.schedule || "24/7")}</span>`
-    })}
+    const wallet = (d && d.wallet) || { address: "—", label: "Phantom-plånbok (botens)" };
+    const unlocked = DeskAPI.isUnlocked && DeskAPI.isUnlocked();
+    const mode = (d && d.mode) || "PAPER";
+    const botCount = ((d && d.bots) || []).length || 17;
+    const br = DeskAPI.getBridge ? DeskAPI.getBridge() : { url: "", token: "" };
+    return `${topbar({ title: "Mer", right: pillPaperOrLive(mode) })}
     <div class="screen"><div class="page">
-      ${window.DeskFun ? DeskFun.ticker(state.ticker && state.ticker.items) : ""}
-      ${greetingBanner(d)}
-      ${window.DeskFun && state.fun ? DeskFun.streakChip(state.fun.streak) : ""}
-      ${heroPnlBlock(d)}
-      ${riskMeter(d && d.risk)}
-      ${liveFeedCard()}
-      ${window.DeskFun && state.fun ? DeskFun.mood(state.fun.mood) : ""}
-      ${window.DeskFun ? DeskFun.laneGauge(state.lanes) : ""}
-      <div class="segments segments-scroll" data-role="chart-range">
-        ${chartRangeButtons()}
-      </div>
-      ${chartSummary(state.chart)}
-      <div class="chart-wrap"><canvas id="equity-chart"></canvas></div>
-      ${moversCard()}
-
-      <div class="card market-card">
-        <div class="regime">
-          <div>
-            <div class="tiny">Marknadsläge</div>
-            <div class="regime-name ${regimeCls}">${h(regimeLabel)}</div>
-          </div>
-        </div>
-        <div class="market-grid">
-          <div class="market-pair">
-            <div class="k">BTC</div>
-            <div class="v nums">${h(fmtUsd(btc.price, { exact: true }))}
-              <span class="chg ${chgClass(btc.change_24h_pct)}">${h(fmtPct(btc.change_24h_pct))}</span>
-            </div>
-          </div>
-          <div class="market-pair">
-            <div class="k">SOL</div>
-            <div class="v nums">${h(fmtUsd(sol.price, { exact: true }))}
-              <span class="chg ${chgClass(sol.change_24h_pct)}">${h(fmtPct(sol.change_24h_pct))}</span>
-            </div>
-          </div>
-        </div>
-        ${d.market && d.market.news ? `<div class="market-note">${h(d.market.news)}</div>` : ""}
+      <div class="account-hero">
+        <div class="mark"><img src="apple-touch-icon.png" alt="Moneymaking G"></div>
+        <h2>Moneymaking G</h2>
+        <p>Körs dygnet runt · ${mode === "LIVE" ? "LIVE" : "PAPER"}-läge</p>
       </div>
 
-      <div class="card-h" style="padding-left:0;padding-right:0">Bots</div>
-      <div class="bot-carousel">
-        ${BOT_ORDER.map((name) => {
-          const b = byName[name] || { name, label: name, status: "idle", last: "" };
-          const color = BOT_COLORS[name] || "var(--label)";
-          return `<a class="bot-card" href="#/bots/${name}" data-nav="#/bots/${name}">
-            <div class="name"><span class="bot-dot" style="background:${color}"></span>${h(b.label || name)}</div>
-            <div class="last">${h(b.last || "Inga beslut än")}</div>
-            <div class="st">${h(b.status || "")}</div>
-          </a>`;
-        }).join("")}
+      <div class="hub-grid">
+        <a class="hub-tile" href="#/bots" data-nav="#/bots">
+          <span class="ico">🤖</span>
+          <span class="t">Botar (${botCount})</span>
+          <span class="s">Status & beslut ›</span>
+        </a>
+        <a class="hub-tile" href="#/regler" data-nav="#/regler">
+          <span class="ico">🛡️</span>
+          <span class="t">Regler & Risk</span>
+          <span class="s">Tak & LIVE-krav ›</span>
+        </a>
+        <a class="hub-tile" href="#/awards" data-nav="#/awards">
+          <span class="ico">🏆</span>
+          <span class="t">Topplista & Märken</span>
+          <span class="s">Vinnare & meme ›</span>
+        </a>
+        <a class="hub-tile" href="#/watch" data-nav="#/watch">
+          <span class="ico">🔎</span>
+          <span class="t">Bevaka</span>
+          <span class="s">Begär coin/aktie ›</span>
+        </a>
       </div>
-
-      ${lanePnlCard(lanes)}
-
-      ${laneFilterRow()}
 
       <div class="card">
-        <div class="card-h">Öppna positioner</div>
-        ${positions.length ? positions.map((p, i) => assetRow(p, `
-            ${tokenAvatar(p.symbol, p.mint, p.icon_url)}
-            <div class="row-body">
-              <div class="row-title">${h(p.symbol)}${laneChip(laneOf(p))}</div>
-              <div class="row-sub">${h(p.name || "")}${p.name ? " · " : ""}entry ${h(fmtUsd(p.entry_usd))}</div>
-            </div>
-            <div class="row-meta">
-              <div class="asset-val nums">${h(fmtUsd(p.value_usd || p.size_usd, { exact: true }))}</div>
-              ${pnlStack(p.pnl_pct, p.pnl_usd)}
-            </div>
-            ${assetLinkOf(p) ? svg("chev") : ""}`, "row has-avatar asset-row", "")).join("") : `<div class="state" style="padding:28px 16px"><p>Inga öppna positioner.</p></div>`}
+        <div class="card-h">Phantom-plånbok (botens)</div>
+        <div class="row" style="align-items:flex-start">
+          <div class="row-body">
+            <div class="addr">${h(wallet.address)}</div>
+            <button class="copy-btn" data-action="copy-wallet" data-addr="${h(wallet.address)}">Kopiera adress</button>
+          </div>
+        </div>
+        ${wallet.sol != null ? `<div class="row"><div class="row-body"><div class="row-title">SOL</div></div><div class="row-meta nums">${h(Number(wallet.sol).toFixed(2))} SOL</div></div>` : ""}
       </div>
 
-      ${window.DeskFun && state.fun ? DeskFun.week(state.fun.week) + DeskFun.meme(state.fun.meme) + DeskFun.chat(state.fun.chat, 8) : ""}
-      ${watching.length ? `<div class="card">
-        <div class="card-h">Bevakas</div>
-        ${watching.map((w) => assetRow(w, `
-            ${tokenAvatar(w.symbol, w.mint)}
-            <div class="row-body">
-              <div class="row-title">${h(w.symbol)}${laneChip(laneOf(w))}</div>
-              <div class="row-sub">${h(w.reason || w.name || "")}</div>
-            </div>
-            <div class="row-meta"><div class="tiny">Score ${h(w.score)}</div></div>
-            ${assetLinkOf(w) ? svg("chev") : ""}`, "row has-avatar")).join("")}
-      </div>` : ""}
+      <div class="card">
+        <div class="card-h">Inställningar</div>
+        <div class="row"><div class="row-body"><div class="row-title">Läge</div></div><div class="row-meta">${pillPaperOrLive(mode)}</div></div>
+        <div class="row"><div class="row-body"><div class="row-title">Schema</div></div><div class="row-meta">${h((d && d.schedule) || "24/7")}</div></div>
+        <div class="row"><div class="row-body"><div class="row-title">Anslutning</div></div><div class="row-meta tiny">${unlocked ? "Inloggad" : "Utloggad"}</div></div>
+        ${unlocked ? `<div class="row"><div class="row-body"><div class="row-title">Session</div><div class="row-sub">Koden sparas inte. Logga ut härifrån.</div></div><button type="button" class="copy-btn" data-action="logout">Logga ut</button></div>` : ""}
+        <div class="row"><div class="row-body"><div class="row-title">Notiser</div><div class="row-sub">Notis vid köp, sälj och stopp</div></div>
+          <button class="copy-btn" data-action="notify">Slå på</button>
+        </div>
+        ${window.DeskFun ? DeskFun.soundToggle() : ""}
+        <div class="row">
+          <div class="row-body">
+            <div class="row-title">API-brygga (valfri)</div>
+            <div class="row-sub">${br.url ? "Kopplad till egen adress" : "Ej kopplad · endast lokal kö på Pages"}</div>
+          </div>
+          <button type="button" class="copy-btn" data-action="toggle-bridge">${state.bridgeOpen ? "Stäng" : "Ställ in"}</button>
+        </div>
+        ${state.bridgeOpen ? `<form class="bridge-form" data-bridge-form>
+          <input class="req-input" type="url" name="url" value="${h(br.url)}" placeholder="https://din-tunnel.exempel.se">
+          <input class="req-input" type="password" name="token" value="${h(br.token)}" placeholder="APP_TOKEN">
+          <div style="display:flex;gap:8px">
+            <button type="submit" class="btn btn-gold" style="margin:0;height:40px;font-size:14px">Spara brygga</button>
+            <button type="button" class="btn btn-secondary" data-action="clear-bridge" style="margin:0;height:40px;font-size:14px">Rensa</button>
+          </div>
+        </form>` : ""}
+        <div class="row"><div class="row-body"><div class="row-title">Version</div><div class="row-sub">${h(buildLabel())}</div></div></div>
+      </div>
 
-      ${picks.length ? `<div class="card">
-        <div class="card-h">Whale-tips</div>
-        ${picks.map((c) => `
-          <div class="row">
-            <div class="row-body">
-              <div class="row-title">${h(c.label)}</div>
-              <div class="row-sub">${h(c.last || shortAddr(c.wallet))}</div>
-            </div>
-          </div>`).join("")}
-      </div>` : ""}
+      <p class="tiny" style="text-align:center;margin:16px 8px 0;line-height:1.4">Appen frågar aldrig efter seed phrase, lösenord eller 2FA-kod. Botens plånbok är en separat Phantom-plånbok som bara Moneymaking G använder.</p>
     </div></div>`;
+  }
+
+  function renderAwards() {
+    const f = state.fun || {};
+    return `${topbar({ title: "Topplista & Märken", back: "#/account", backLabel: "Mer", right: pillPaperOrLive(state.desk && state.desk.mode) })}
+    <div class="screen"><div class="page">
+      ${window.DeskFun ? DeskFun.leaderboard(f.leaderboard, state.lbPeriod || "vecka") : ""}
+      ${window.DeskFun ? DeskFun.week(f.week) : ""}
+      ${window.DeskFun ? DeskFun.meme(f.meme) : ""}
+      ${window.DeskFun ? DeskFun.badges(f.badges, f.mode) : ""}
+    </div></div>`;
+  }
+
+  function renderBots() {
+    if (state.loading && !state.desk) return skeleton();
+    if (state.error && !state.desk) return errorView(state.error);
+    const list = (state.desk && state.desk.bots) || [];
+    const byName = Object.fromEntries(list.map((b) => [b.name, b]));
+    return `${topbar({ title: "Botar", back: "#/account", backLabel: "Mer", right: pillPaperOrLive(state.desk && state.desk.mode) })}
+    <div class="screen"><div class="page">
+      <p class="muted" style="font-size:14px;margin:2px 0 8px">Alla botar jobbar ihop dygnet runt. Tryck på en bot för att se dess beslut.</p>
+      ${BOT_GROUPS.map((g) => `
+      <div class="card-h group-h">${h(g.title)}</div>
+      <div class="card bots-list">
+        ${g.names.map((name) => {
+          const b = byName[name] || { name, label: botMeta(name).label, status: "idle", last: "" };
+          const color = BOT_COLORS[name] || "var(--label)";
+          return `<a class="row" href="#/bots/${name}" data-nav="#/bots/${name}">
+            <span class="bot-dot" style="background:${color}"></span>
+            <div class="row-body">
+              <div class="row-title">${h(b.label || name)}</div>
+              <div class="row-sub">${h(b.last || "Inga beslut än")}</div>
+            </div>
+            <div class="row-meta"><div class="tiny">${h(({running:"jobbar",idle:"väntar",buying:"köper",paused:"pausad",degraded:"strular",error:"fel",stopped:"stoppad"})[b.status] || b.status)}${b.ts ? " · " + relTime(b.ts) : ""}</div></div>
+            ${svg("chev")}
+          </a>`;
+        }).join("")}
+      </div>`).join("")}
+    </div></div>`;
+  }
+
+  function renderBot() {
+    if (state.loading && !state.bot) return `${topbar({ title: "Bot", back: "#/bots" })}${skeleton()}`;
+    if (state.error) return errorView(state.error, "#/bots");
+    const b = state.bot;
+    if (!b) return errorView("Boten hittades inte.", "#/bots");
+    const color = BOT_COLORS[b.name] || "var(--label)";
+    const dec = b.decisions || [];
+    return `${topbar({ title: b.label || b.name, back: "#/bots", backLabel: "Botar" })}
+    <div class="screen"><div class="page">
+      <div class="bot-hero">
+        <div class="swatch" style="background:${color}"></div>
+        <div>
+          <div class="row-title" style="font-size:22px;font-weight:720;letter-spacing:-0.5px">${h(b.label || b.name)}</div>
+          <div class="row-sub bot-desc">${h(({running:"jobbar",idle:"väntar",buying:"köper",paused:"pausad",degraded:"strular",error:"fel",stopped:"stoppad"})[b.status] || b.status)} · ${h(b.description || "")}</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-h">Beslut</div>
+        ${dec.length ? dec.map((d) => `
+          ${(() => { const L = assetLinkOf(d); const tag = L && L.url ? "a" : "div"; const href = L && L.url ? ` href="${h(L.url)}" target="_blank" rel="noopener"` : ""; return `
+          <${tag} class="decision"${href}>
+            <div class="when">${h(sthlmStamp(d.ts) || relTime(d.ts))}${d.symbol ? " · " + h(d.symbol) : ""}</div>
+            <div class="act">${h(d.action || "")}</div>
+            <p>${h(d.reason || "")}</p>
+          </${tag}>`; })()}
+        `).join("") : emptyView("Inga beslut än", "När boten gör något syns det här.")}
+      </div>
+    </div></div>`;
+  }
+
+  function renderChat() {
+    const back = (state.route && state.route.bot) ? "#/bots" : "#/live";
+    const page = window.DeskFun && DeskFun.chatPage
+      ? DeskFun.chatPage((state.fun && state.fun.chat) || [], state.route && state.route.bot, back)
+      : { title: "Botarnas chatt", back: back, html: "<div class=\"muted\" style=\"padding:24px\">Chatten kunde inte laddas.</div>" };
+    return `${topbar({ title: page.title, back: page.back, backLabel: "Tillbaka" })}
+    <div class="chat-screen">${page.html}</div>`;
   }
 
   function renderCoin() {
@@ -826,7 +1280,7 @@
       <div class="chart-wrap" style="height:180px;margin-top:12px"><canvas id="price-chart"></canvas></div>
 
       ${pos ? `<div class="card">
-        <div class="card-h">Din PAPER-position</div>
+        <div class="card-h">Din position</div>
         <div class="row"><div class="row-body"><div class="row-title">Värde</div></div><div class="row-meta nums">${h(fmtUsd(pos.value_usd || pos.size_usd, { exact: true }))}</div></div>
         <div class="row"><div class="row-body"><div class="row-title">Resultat</div></div><div class="row-meta">${pnlStack(pos.pnl_pct, pos.pnl_usd)}</div></div>
         <div class="row"><div class="row-body"><div class="row-title">Köpt vid</div></div><div class="row-meta nums">${h(fmtUsd(pos.entry_usd))}</div></div>
@@ -900,236 +1354,6 @@
     </div></div>`;
   }
 
-
-  function renderChat() {
-    const back = (state.route && state.route.bot) ? "#/bots" : "#/home";
-    const page = window.DeskFun && DeskFun.chatPage
-      ? DeskFun.chatPage((state.fun && state.fun.chat) || [], state.route && state.route.bot, back)
-      : { title: "Botarnas chatt", back: back, html: "<div class=\"muted\" style=\"padding:24px\">Chatten kunde inte laddas.</div>" };
-    return `${topbar({ title: page.title, back: page.back, backLabel: "Tillbaka" })}
-    <div class="chat-screen">${page.html}</div>`;
-  }
-
-  function renderBots() {
-    if (state.loading && !state.desk) return skeleton();
-    if (state.error && !state.desk) return errorView(state.error);
-    const list = (state.desk && state.desk.bots) || [];
-    const byName = Object.fromEntries(list.map((b) => [b.name, b]));
-    return `${topbar({ title: "Botar", right: pillPaperOrLive(state.desk && state.desk.mode) })}
-    <div class="screen"><div class="page">
-      <p class="muted" style="font-size:14px;margin:2px 0 8px">Alla botar jobbar ihop dygnet runt. Tryck på en bot för att öppna chatten.</p>
-      ${BOT_GROUPS.map((g) => `
-      <div class="card-h group-h">${h(g.title)}</div>
-      <div class="card bots-list">
-        ${g.names.map((name) => {
-          const b = byName[name] || { name, label: name[0].toUpperCase() + name.slice(1).replace("_", " "), status: "idle", last: "" };
-          const color = BOT_COLORS[name] || "var(--label)";
-          return `<a class="row" href="#/chat/${name}" data-nav="#/chat/${name}">
-            <span class="bot-dot" style="background:${color}"></span>
-            <div class="row-body">
-              <div class="row-title">${h(b.label || name)}</div>
-              <div class="row-sub">${h(b.last || "Inga beslut än")}</div>
-            </div>
-            <div class="row-meta"><div class="tiny">${h(({running:"jobbar",idle:"väntar",buying:"köper",paused:"pausad",degraded:"strular",error:"fel",stopped:"stoppad"})[b.status] || b.status)}${b.ts ? " · " + relTime(b.ts) : ""}</div></div>
-            ${svg("chev")}
-          </a>`;
-        }).join("")}
-      </div>`).join("")}
-      ${window.DeskFun && state.fun ? DeskFun.leaderboard(state.fun.leaderboard, state.lbPeriod || "vecka") + DeskFun.chat(state.fun.chat, 30) + DeskFun.badges(state.fun.badges, state.fun.mode) : ""}
-    </div></div>`;
-  }
-
-  function renderBot() {
-    if (state.loading && !state.bot) return `${topbar({ title: "Bot", back: "#/bots" })}${skeleton()}`;
-    if (state.error) return errorView(state.error, "#/bots");
-    const b = state.bot;
-    if (!b) return errorView("Boten hittades inte.", "#/bots");
-    const color = BOT_COLORS[b.name] || "var(--label)";
-    const dec = b.decisions || [];
-    return `${topbar({ title: b.label || b.name, back: "#/bots", backLabel: "Botar" })}
-    <div class="screen"><div class="page">
-      <div class="bot-hero">
-        <div class="swatch" style="background:${color}"></div>
-        <div>
-          <div class="row-title" style="font-size:22px;font-weight:720;letter-spacing:-0.5px">${h(b.label || b.name)}</div>
-          <div class="row-sub bot-desc">${h(({running:"jobbar",idle:"väntar",buying:"köper",paused:"pausad",degraded:"strular",error:"fel",stopped:"stoppad"})[b.status] || b.status)} · ${h(b.description || "")}</div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-h">Beslut</div>
-        ${dec.length ? dec.map((d) => `
-          ${(() => { const L = assetLinkOf(d); const tag = L && L.url ? "a" : "div"; const href = L && L.url ? ` href="${h(L.url)}" target="_blank" rel="noopener"` : ""; return `
-          <${tag} class="decision"${href}>
-            <div class="when">${h(sthlmStamp(d.ts) || relTime(d.ts))}${d.symbol ? " · " + h(d.symbol) : ""}</div>
-            <div class="act">${h(d.action || "")}</div>
-            <p>${h(d.reason || "")}</p>
-          </${tag}>`; })()}
-        `).join("") : emptyView("Inga beslut än", "När boten gör något syns det här.")}
-      </div>
-    </div></div>`;
-  }
-
-  function renderActivity() { return renderLive(); }
-
-  function liveChatItems() {
-    const out = [];
-    const seen = new Set();
-    const push = (it) => {
-      if (!it) return;
-      const text = (it.text || it.title || it.body || "").trim();
-      if (!text) return;
-      const rawId = String(it.id != null ? it.id : "").replace(/^[ae]:/, "");
-      const bot = it.from_bot || it.bot;
-      const id = rawId || (bot + "|" + text + "|" + (it.ts || ""));
-      if (seen.has(id) || seen.has(bot + "|" + text)) return;
-      seen.add(id);
-      seen.add(bot + "|" + text);
-      out.push({
-        id, ts: it.ts, kind: (it.kind || "system"),
-        from_bot: bot, to_bot: it.to_bot, text,
-        thread_id: it.thread_id, mint: it.mint, symbol: it.symbol, lane: it.lane,
-        pnl_usd: it.pnl_usd, pnl_pct: it.pnl_pct
-      });
-    };
-    ((state.chatter && state.chatter.items) || []).forEach(push);
-    ((state.live && state.live.items) || []).forEach(push);
-    if (!out.length) {
-      ((state.activity && state.activity.items) || []).forEach(push);
-      ((state.fun && state.fun.chat) || []).forEach(push);
-    }
-    return out;
-  }
-
-  function liveKindMatch(kind, filter) {
-    const k = String(kind || "").toLowerCase();
-    if (!filter || filter === "all") return true;
-    if (filter === "chat") return k === "question" || k === "answer" || k === "checkin" || k === "decision";
-    if (filter === "trades") return k === "buy" || k === "sell" || k === "bought" || k === "sold" || k === "decision";
-    if (filter === "blocks") return k === "block" || k === "stop" || k === "stopped" || k === "rejected" || k === "guard";
-    return true;
-  }
-
-  function activityFilterMatch(kind, filter) { return liveKindMatch(kind, filter); }
-
-  function liveKindTag(kind) {
-    return ({
-      question: "frågar", answer: "svarar", checkin: "koll", decision: "beslut",
-      buy: "köp", sell: "sälj", stop: "stopp", block: "stopp", news: "nyhet"
-    })[kind] || "";
-  }
-
-  function renderLiveMsg(it, reply) {
-    const meta = botMeta(it.from_bot);
-    const to = it.to_bot ? botMeta(it.to_bot).label : "";
-    const tag = liveKindTag(it.kind);
-    const who = to ? `${meta.label} → ${to}` : meta.label;
-    const cls = `msg${reply ? " reply" : ""}${it.kind ? " k-" + h(it.kind) : ""}`;
-    return `<div class="${cls}" data-bot="${h(it.from_bot || "")}">
-      <span class="av" title="${h(meta.label)}">${meta.emoji}</span>
-      <div class="bubble">
-        <div class="who"><span class="who-name">${h(who)}</span>${tag ? `<span class="kind-tag">${h(tag)}</span>` : ""}<span class="when">${h(sthlmStamp(it.ts) || relTime(it.ts) || "")}</span></div>
-        <div class="bubble-text">${h(it.text)}</div>
-        ${it.pnl_usd != null && (it.kind === "sell" || it.kind === "stop") ? `<div class="chg ${chgClass(it.pnl_usd)} nums">${h(fmtUsd(it.pnl_usd, { exact: true }))}</div>` : ""}
-      </div>
-    </div>`;
-  }
-
-  function renderLive() {
-    const raw = liveChatItems();
-    if (state.loading && !raw.length) return `${topbar({ title: "Live" })}${skeleton()}`;
-    if (state.error && !raw.length) return errorView(state.error);
-    const filtered = raw.filter((it) => liveKindMatch(it.kind, state.activityFilter))
-      .filter((it) => !state.liveBotFilter || state.liveBotFilter === "all" || it.from_bot === state.liveBotFilter || it.to_bot === state.liveBotFilter)
-      .slice()
-      .sort((x, y) => {
-        const ta = parseTs(x && x.ts), tb = parseTs(y && y.ts);
-        return (tb ? tb.getTime() : 0) - (ta ? ta.getTime() : 0);
-      });
-    const bots = [];
-    const seen = new Set();
-    raw.forEach((it) => {
-      const b = it.from_bot;
-      if (b && !seen.has(b)) { seen.add(b); bots.push(b); }
-    });
-    const order = ["newsfeed", "social", "analyst", "scanner", "whale", "risk", "meme_test", "majors", "assets"];
-    bots.sort((a, b) => {
-      const ia = order.indexOf(a), ib = order.indexOf(b);
-      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b);
-    });
-    const kindFilters = [["all", "Alla"], ["chat", "Snack"], ["trades", "Affärer"]];
-    const botChips = [["all", "Alla botar"], ...bots.map((b) => [b, botMeta(b).emoji + " " + botMeta(b).label])];
-    const threads = new Map();
-    const blocks = [];
-    filtered.forEach((it) => {
-      if (it.thread_id) {
-        if (!threads.has(it.thread_id)) {
-          const list = [];
-          threads.set(it.thread_id, list);
-          blocks.push({ type: "thread", id: it.thread_id, list });
-        }
-        threads.get(it.thread_id).push(it);
-      } else {
-        blocks.push({ type: "msg", it });
-      }
-    });
-    const html = blocks.map((b) => {
-      if (b.type === "msg") return renderLiveMsg(b.it, false);
-      const list = b.list.slice().sort((x, y) => {
-        const rank = (k) => k === "question" ? 0 : k === "answer" ? 1 : k === "decision" ? 2 : 3;
-        const d = rank(x.kind) - rank(y.kind);
-        if (d) return d;
-        const ta = parseTs(x.ts), tb = parseTs(y.ts);
-        return (ta ? ta.getTime() : 0) - (tb ? tb.getTime() : 0);
-      });
-      return `<div class="thread">${list.map((it, i) => renderLiveMsg(it, i > 0)).join("")}</div>`;
-    }).join("");
-    return `${topbar({ title: "Live", right: pillPaperOrLive(state.desk && state.desk.mode) })}
-    <div class="screen"><div class="page live-page">
-      <p class="live-lead">Botarna frågar varandra och svarar med riktig data. Uppdateras varje minut.</p>
-      <div class="filters">
-        ${kindFilters.map(([id, lab]) => `<button data-filter="${id}" class="${state.activityFilter === id ? "on" : ""}">${lab}</button>`).join("")}
-      </div>
-      <div class="filters bot-filters">
-        ${botChips.map(([id, lab]) => `<button data-bot-filter="${h(id)}" class="${(state.liveBotFilter || "all") === id ? "on" : ""}">${h(lab)}</button>`).join("")}
-      </div>
-      ${filtered.length ? `<div class="live-chat" id="live-chat-feed">${html}</div>` : emptyView("Inget snack än", "När botarna kollar läget eller frågar varandra syns det här.")}
-    </div></div>`;
-  }
-
-  const KIND_SV = { buy:"KÖP", sell:"SÄLJ", stop:"STOPP", block:"STOPP", rejected:"SKIP", lesson:"LÄRD",
-    scan:"SIGNAL", signal:"SIGNAL", risk:"RISK", research:"RES", whale:"WHALE", sentiment:"STÄMN",
-    guard:"VAKT", portfolio:"PORT", review:"REV", system:"INFO", news:"NYHET", whale:"WHALE" };
-
-  function liveFeedCard() {
-    const raw = ((state.live && state.live.items) || (state.activity && state.activity.items) || []).slice();
-    raw.sort((a, b) => {
-      const ta = parseTs(a && a.ts), tb = parseTs(b && b.ts);
-      return (tb ? tb.getTime() : 0) - (ta ? ta.getTime() : 0);
-    });
-    const items = raw.slice(0, 20);
-    const rows = items.length ? items.map((it) => {
-      const kind = it.kind || "system";
-      const tag = KIND_SV[kind] || "INFO";
-      const inner = `
-        <div class="event-kind ${h(kind)}">${tag}</div>
-        <div class="row-body">
-          <div class="row-title">${h(it.title || it.symbol || "Händelse")}${laneChip(laneOf(it))}</div>
-          <div class="row-sub">${h(it.body || it.symbol || "")}</div>
-        </div>
-        <div class="row-meta">
-          <div class="tiny">${h(sthlmStamp(it.ts) || relTime(it.ts))}</div>
-          ${tradePnlMeta(it)}
-        </div>
-        ${assetLinkOf(it) ? svg("chev") : ""}`;
-      return assetRow(it, inner);
-    }).join("") : `<div class="state" style="padding:20px 16px"><p>Inga händelser än</p></div>`;
-    return `<div class="card" id="live-feed">
-      <div class="card-h">Senaste händelser <a class="link" href="#/live" data-nav="#/live">Visa alla</a></div>
-      <p class="live-lead">Senaste köp, sälj och signaler från botarna. Uppdateras varje minut.</p>
-      ${rows}
-    </div>`;
-  }
-
   function renderRegler() {
     const d = state.desk || {};
     const risk = d.risk || {};
@@ -1179,14 +1403,17 @@
       </div>`;
     }).join("");
     const paused = d.entries_paused;
-    return `${topbar({ title: "Regler", back: "#/account", backLabel: "Konto" })}
+    return `${topbar({ title: "Regler & Risk", back: "#/account", backLabel: "Mer", right: pillPaperOrLive(mode) })}
     <div class="screen"><div class="page">
-      <p class="rules-lead">Här är reglerna botarna följer just nu. De skyddar kontot. Inget ändras förrän du godkänner det här i appen — inte i Telegram.</p>
+      <p class="rules-lead">Här är reglerna botarna följer just nu. De skyddar kontot. Inget ändras förrän du godkänner det i appen — aldrig i Telegram.</p>
+
+      ${riskMeter(d.risk)}
+      ${window.DeskFun ? DeskFun.laneGauge(state.lanes) : ""}
 
       ${paused ? `<div class="card"><div class="card-h">Köppaus</div><div class="rule-item"><div class="row-title">Nya köp är pausade</div><div class="row-sub">${h(d.entries_paused_reason || "Kontot är pausat just nu.")}</div></div></div>` : ""}
 
       <div class="card">
-        <div class="card-h">Risk</div>
+        <div class="card-h">Riskgränser</div>
         <div class="rule-item"><div class="row-title">Högst ${h(tradePct)} % per affär</div><div class="row-sub">Botarna får inte riskera mer än så av värdet i en enda trade.</div></div>
         <div class="rule-item"><div class="row-title">Dagen −${h(dailyLim)} %: stopp för nya köp</div><div class="row-sub">Om dagen går så mycket back stoppas nya köp resten av dagen.</div></div>
         <div class="rule-item"><div class="row-title">Veckan −${h(weekLim)} %: halv storlek</div><div class="row-sub">Om veckan går så mycket back handlar botarna med halv storlek.</div></div>
@@ -1200,6 +1427,8 @@
         <div class="rule-item"><div class="row-title">Högst 15 procentenheter per flytt, en gång per dygn</div><div class="row-sub">Botarna får inte flytta mer än så, och inte oftare än en gång på 24 timmar.</div></div>
         <div class="rule-item"><div class="row-title">Fördelning nu</div><div class="row-sub">${h(split.memecoin)} % memecoins · ${h(split.majors)} % större coins · ${h(split.reserve)} % reserv.</div></div>
       </div>
+
+      ${window.DeskFun ? DeskFun.laneHistory(state.lanes) : ""}
 
       <div class="card">
         <div class="card-h">Hävstång</div>
@@ -1215,10 +1444,10 @@
       </div>
 
       <div class="card">
-        <div class="card-h">PAPER och LIVE</div>
+        <div class="card-h">Krav för LIVE</div>
         <div class="rule-item">
           <div class="row-title">Allt körs i PAPER tills du skriver LIVE</div>
-          <div class="row-sub">Just nu: ${mode === "LIVE" ? "LIVE" : "PAPER"}. Ett spår blir aktuellt för LIVE först efter bevis i PAPER. Du måste själv skriva LIVE — botarna kan inte slå på det.</div>
+          <div class="row-sub">Ett spår blir aktuellt för LIVE först efter bevis i PAPER. Du måste själv skriva LIVE — botarna kan inte slå på det.</div>
         </div>
         ${gradLanes || `<div class="rule-check"><span class="mark">○</span><span>Minst 60 dagar i PAPER</span></div>
         <div class="rule-check"><span class="mark">○</span><span>Plusresultat i spåret</span></div>
@@ -1226,50 +1455,6 @@
         <div class="rule-check"><span class="mark">○</span><span>Minst 20 affärer, minst 50 % vinnande</span></div>
         <div class="rule-check"><span class="mark">○</span><span>Inga regelbrott senaste 30 dagarna</span></div>`}
       </div>
-    </div></div>`;
-  }
-
-  function renderAccount() {
-    const d = state.desk;
-    const wallet = (d && d.wallet) || { address: "—", label: "Phantom-plånbok (botens)" };
-    const unlocked = DeskAPI.isUnlocked && DeskAPI.isUnlocked();
-    const mode = (d && d.mode) || "PAPER";
-    return `${topbar({ title: "Konto" })}
-    <div class="screen"><div class="page">
-      <div class="account-hero">
-        <div class="mark"><img src="apple-touch-icon.png" alt="Moneymaking G"></div>
-        <h2>Moneymaking G</h2>
-        <p>Körs dygnet runt · ${mode === "LIVE" ? "LIVE" : "PAPER"}-läge</p>
-      </div>
-      ${d ? `<div class="card account-pnl">${heroPnlBlock(d)}</div>` : ""}
-
-      <div class="card">
-        <div class="card-h">Phantom-plånbok (botens)</div>
-        <div class="row" style="align-items:flex-start">
-          <div class="row-body">
-            <div class="addr">${h(wallet.address)}</div>
-            <button class="copy-btn" data-action="copy-wallet" data-addr="${h(wallet.address)}">Kopiera adress</button>
-          </div>
-        </div>
-        ${wallet.sol != null ? `<div class="row"><div class="row-body"><div class="row-title">SOL</div></div><div class="row-meta nums">${h(Number(wallet.sol).toFixed(2))} SOL</div></div>` : ""}
-      </div>
-
-      <div class="card">
-        <div class="row"><div class="row-body"><div class="row-title">Läge</div></div><div class="row-meta">${pillPaperOrLive(mode)}</div></div>
-        <div class="row"><div class="row-body"><div class="row-title">Schema</div></div><div class="row-meta">${h((d && d.schedule) || "24/7")}</div></div>
-        <div class="row"><div class="row-body"><div class="row-title">Anslutning</div></div><div class="row-meta tiny">${unlocked ? "Inloggad" : "Utloggad"}</div></div>
-        ${unlocked ? `<div class="row"><div class="row-body"><div class="row-title">Session</div><div class="row-sub">Koden sparas inte. Du kan logga ut härifrån.</div></div><button type="button" class="copy-btn" data-action="logout">Logga ut</button></div>` : ""}
-        <div class="row"><div class="row-body"><div class="row-title">Notiser</div><div class="row-sub">Notis vid köp, sälj och stopp</div></div>
-          <button class="copy-btn" data-action="notify">Slå på</button>
-        </div>
-        ${window.DeskFun ? DeskFun.soundToggle() : ""}
-        <a class="row" href="#/regler" data-nav="#/regler"><div class="row-body"><div class="row-title">Regler</div><div class="row-sub">Så här skyddas kontot</div></div>${svg("chev")}</a>
-        <div class="row"><div class="row-body"><div class="row-title">Version</div><div class="row-sub">${h(buildLabel())}</div></div></div>
-      </div>
-
-      ${window.DeskFun ? DeskFun.laneHistory(state.lanes) : ""}
-      ${window.DeskFun && state.fun ? DeskFun.badges(state.fun.badges, state.fun.mode) : ""}
-      <p class="tiny" style="text-align:center;margin:18px 8px 0;line-height:1.4">Appen frågar aldrig efter seed phrase, lösenord eller 2FA-kod. Botens plånbok är en separat Phantom-plånbok som bara Moneymaking G använder.</p>
     </div></div>`;
   }
 
@@ -1292,10 +1477,11 @@
   }
 
   function tabFor(route) {
-    if (route.name === "chat") return ""; // full-screen chat, no tab bar
-    if (route.name === "bots" || route.name === "bot") return "bots";
+    if (route.name === "chat") return "";
+    if (route.name === "markets") return "markets";
+    if (route.name === "watch") return "watch";
     if (route.name === "activity" || route.name === "live") return "live";
-    if (route.name === "account" || route.name === "regler") return "account";
+    if (route.name === "account" || route.name === "bots" || route.name === "bot" || route.name === "regler" || route.name === "awards") return "account";
     return "home";
   }
 
@@ -1380,11 +1566,7 @@
     $ptr.classList.toggle("error", mode === "error");
     $ptr.classList.toggle("spinning", mode === "loading");
     $ptrText.textContent = text || "";
-    if (mode === "loading") {
-      $ptrSpin.style.transform = "";
-    } else if (mode === "error") {
-      $ptrSpin.style.transform = "";
-    }
+    if (mode === "loading" || mode === "error") $ptrSpin.style.transform = "";
   }
   function ptrHideHint() {
     if (ptr.hideTimer) { clearTimeout(ptr.hideTimer); ptr.hideTimer = 0; }
@@ -1449,11 +1631,11 @@
       ptr.dy = 0;
       return;
     }
-    const go = ptrOffset(ptr.dy) >= PTR_THRESHOLD;
+    const goPull = ptrOffset(ptr.dy) >= PTR_THRESHOLD;
     ptr.pulling = false;
     ptr.armed = false;
     ptr.dy = 0;
-    if (go) pullRefresh();
+    if (goPull) pullRefresh();
     else ptrSnapBack();
   }
   async function ptrSnapBack() {
@@ -1471,16 +1653,22 @@
     try {
       if (typeof DeskAPI.refreshSnap === "function") await DeskAPI.refreshSnap();
       else if (typeof DeskAPI.loadSnap === "function") await DeskAPI.loadSnap();
-      const [desk, live, act, ch] = await Promise.all([
+      const [desk, live, act, ch, moods, reqs, uni] = await Promise.all([
         DeskAPI.getState().catch(() => null),
         DeskAPI.getLive ? DeskAPI.getLive().catch(() => null) : null,
         DeskAPI.getActivity({ kind: state.activityFilter }).catch(() => null),
-        DeskAPI.getChatter ? DeskAPI.getChatter().catch(() => null) : null
+        DeskAPI.getChatter ? DeskAPI.getChatter().catch(() => null) : null,
+        DeskAPI.getMoods ? DeskAPI.getMoods().catch(() => null) : null,
+        DeskAPI.getRequests ? DeskAPI.getRequests().catch(() => null) : null,
+        DeskAPI.getUniverse ? DeskAPI.getUniverse().catch(() => null) : null
       ]);
       if (desk) state.desk = desk;
       if (live) state.live = live;
       if (act) state.activity = act;
       if (ch) state.chatter = ch;
+      if (moods) state.moods = moods;
+      if (reqs) state.requests = reqs;
+      if (uni) state.universe = uni;
       await loadFun();
       render({ keepScroll: true });
       ptrSetSheet(PTR_HOLD, false);
@@ -1510,6 +1698,9 @@
     const needsAuth = !(DeskAPI.isUnlocked && DeskAPI.isUnlocked());
     let body;
     if (needsAuth) body = renderLock();
+    else if (route.name === "markets") body = renderMarkets();
+    else if (route.name === "watch") body = renderWatch();
+    else if (route.name === "awards") body = renderAwards();
     else if (route.name === "coin") body = renderCoin();
     else if (route.name === "audit") body = renderAudit();
     else if (route.name === "chat") body = renderChat();
@@ -1527,7 +1718,7 @@
     if (body && body.indexOf('<div class="page">') >= 0) {
       body = body.replace('<div class="page">', '<div class="page">' + freshnessBlock());
     }
-    $app.innerHTML = `${body}${tabbar(tabFor(route))}${lightbox()}<div class="toast ${state.toast ? "show" : ""}" id="toast">${h(state.toast)}</div>`;
+    $app.innerHTML = `${body}${needsAuth ? "" : tabbar(tabFor(route))}${lightbox()}<div class="toast ${state.toast ? "show" : ""}" id="toast">${h(state.toast)}</div>`;
     ensurePtr();
     if (snap) restoreScroll(snap);
     requestAnimationFrame(() => {
@@ -1540,7 +1731,7 @@
     const eq = document.getElementById("equity-chart");
     if (eq && state.chart && state.chart.points) DeskCharts.drawEquity(eq, state.chart.points);
     const feed = document.getElementById("chat-feed");
-    if (feed) feed.scrollTop = feed.scrollHeight;
+    if (feed && state.route.name === "live") feed.scrollTop = feed.scrollHeight;
     const px = document.getElementById("price-chart");
     if (px && state.coin && state.coin.chart) DeskCharts.drawPrice(px, state.coin.chart);
   }
@@ -1585,19 +1776,24 @@
     } catch (_) {}
   }
   window.DeskToast = (m) => toast(m);
+
   async function pollSnapshot() {
     if (document.hidden || !(DeskAPI.isUnlocked && DeskAPI.isUnlocked())) return;
     try {
-      const [desk, live, act] = await Promise.all([
+      const [desk, live, act, moods, reqs] = await Promise.all([
         DeskAPI.getState().catch(() => null),
         DeskAPI.getLive ? DeskAPI.getLive().catch(() => null) : null,
-        DeskAPI.getActivity({ kind: state.activityFilter }).catch(() => null)
+        DeskAPI.getActivity({ kind: state.activityFilter }).catch(() => null),
+        DeskAPI.getMoods ? DeskAPI.getMoods().catch(() => null) : null,
+        DeskAPI.getRequests ? DeskAPI.getRequests().catch(() => null) : null
       ]);
       if (desk) state.desk = desk;
       if (live) state.live = live;
       if (act) state.activity = act;
+      if (moods) state.moods = moods;
+      if (reqs) state.requests = reqs;
       await loadFun();
-      if (["home", "bots", "account", "chat", "regler", "activity", "live"].includes(state.route.name)) {
+      if (["home", "markets", "watch", "bots", "account", "chat", "regler", "awards", "activity", "live"].includes(state.route.name)) {
         render({ keepScroll: true });
       }
     } catch (_) {}
@@ -1622,17 +1818,38 @@
       if (r.name === "home") {
         state.loading = true;
         render();
-        const [c, mv, live] = await Promise.all([
-          DeskAPI.getChart(state.chartRange),
-          DeskAPI.getMovers ? DeskAPI.getMovers(state.chartRange).catch(() => null) : null,
-          DeskAPI.getLive ? DeskAPI.getLive().catch(() => DeskAPI.getActivity({}).catch(() => null)) : DeskAPI.getActivity({}).catch(() => null)
+        const [c] = await Promise.all([
+          DeskAPI.getChart(state.chartRange)
         ]);
         state.chart = c;
         if (c && c.range && c.range !== state.chartRange) state.chartRange = c.range;
-        if (mv) state.movers = mv;
-        if (live) { state.live = live; if (!state.activity) state.activity = live; }
         state.loading = false;
         render({ keepScroll: false });
+        return;
+      }
+      if (r.name === "markets") {
+        state.loading = true;
+        render();
+        const [moods, mv, uni] = await Promise.all([
+          DeskAPI.getMoods ? DeskAPI.getMoods().catch(() => null) : null,
+          DeskAPI.getMovers ? DeskAPI.getMovers(state.chartRange).catch(() => null) : null,
+          DeskAPI.getUniverse ? DeskAPI.getUniverse().catch(() => null) : null
+        ]);
+        if (moods) state.moods = moods;
+        if (mv) state.movers = mv;
+        if (uni) state.universe = uni;
+        state.loading = false;
+        render({ keepScroll: false });
+        return;
+      }
+      if (r.name === "watch") {
+        state.loading = true;
+        render();
+        const reqs = DeskAPI.getRequests ? await DeskAPI.getRequests().catch(() => null) : null;
+        if (reqs) state.requests = reqs;
+        state.loading = false;
+        render({ keepScroll: false });
+        refreshWatchQuotes(false);
         return;
       }
       if (r.name === "activity" || r.name === "live") {
@@ -1689,6 +1906,8 @@
         state.movers = null;
         state.live = null;
         state.activity = null;
+        state.moods = null;
+        state.requests = null;
         state.error = null;
         state.lockError = null;
         render({ keepScroll: false });
@@ -1707,10 +1926,186 @@
       state.toast = "";
       const t = document.getElementById("toast");
       if (t) t.classList.remove("show");
-    }, 1600);
+    }, 1800);
+  }
+
+  function parseAlertVal(v) {
+    const s = String(v == null ? "" : v).trim().replace(",", ".");
+    if (!s) return null;
+    const n = Number(s);
+    if (!isFinite(n) || n <= 0) return NaN;
+    return n;
+  }
+
+  async function refreshWatchQuotes(force) {
+    const list = mergedWatchItems();
+    if (!list.length || !DeskAPI.fetchPublicQuotes) return;
+    if (state.quotesLoading && !force) return;
+    state.quotesLoading = true;
+    if (force && state.route.name === "watch") render({ keepScroll: true });
+    try {
+      if (force && DeskAPI.canWriteRemote && DeskAPI.canWriteRemote() && DeskAPI.refreshRequests) {
+        try {
+          const srv = await DeskAPI.refreshRequests();
+          if (srv && srv.items) state.requests = Object.assign({}, state.requests || {}, { items: srv.items });
+        } catch (_) {}
+      }
+      const quotes = await DeskAPI.fetchPublicQuotes(list);
+      const nowIso = new Date().toISOString();
+      Object.keys(quotes || {}).forEach((k) => {
+        if (quotes[k]) state.liveQuotes[k] = Object.assign({ ts: nowIso }, quotes[k]);
+      });
+      // Update local items' cached price & check local visual alerts
+      const locs = readLocalRequests();
+      let changed = false;
+      const updatedLocs = locs.map((it) => {
+        const q = quoteForWatchItem(it);
+        if (!q || q.price == null) return it;
+        changed = true;
+        const copy = Object.assign({}, it, { price: q.price, change_24h: q.change_24h, quote_ts: nowIso });
+        if (!copy.alert_triggered_at) {
+          if (copy.alert_above != null && q.price >= Number(copy.alert_above)) {
+            copy.alert_triggered_at = nowIso;
+            toast(`🔔 ${copy.symbol} nådde över $${copy.alert_above}!`);
+          } else if (copy.alert_below != null && q.price <= Number(copy.alert_below)) {
+            copy.alert_triggered_at = nowIso;
+            toast(`🔔 ${copy.symbol} nådde under $${copy.alert_below}!`);
+          }
+        }
+        return copy;
+      });
+      if (changed) writeLocalRequests(updatedLocs);
+    } catch (_) {
+    } finally {
+      state.quotesLoading = false;
+      if (state.route.name === "watch") render({ keepScroll: true });
+    }
+  }
+
+  async function submitWatchRequest(symbol, assetType, note, alertAboveRaw, alertBelowRaw) {
+    const clean = String(symbol || "").trim().replace(/^\$/, "");
+    if (!clean) {
+      state.reqError = "Skriv en symbol eller mint-adress först.";
+      render({ keepScroll: true });
+      return;
+    }
+    const above = parseAlertVal(alertAboveRaw);
+    const below = parseAlertVal(alertBelowRaw);
+    if (Number.isNaN(above) || Number.isNaN(below)) {
+      state.reqError = "Ogiltigt larmpris — ange ett positivt tal i USD.";
+      render({ keepScroll: true });
+      return;
+    }
+    state.reqBusy = true;
+    state.reqError = "";
+    render({ keepScroll: true });
+    try {
+      const res = await DeskAPI.submitRequest({
+        symbol: clean,
+        asset_type: assetType || "auto",
+        note: note || "",
+        alert_above: above,
+        alert_below: below
+      });
+      if (res && res.ok && res.item) {
+        const cur = (state.requests && state.requests.items) || [];
+        state.requests = Object.assign({}, state.requests || {}, {
+          items: [res.item].concat(cur.filter((x) => x.id !== res.item.id))
+        });
+        state.reqFormSym = "";
+        state.reqFormNote = "";
+        state.reqFormAbove = "";
+        state.reqFormBelow = "";
+        toast(`${res.item.symbol} tillagd i bevakningen`);
+      } else {
+        const list = readLocalRequests();
+        const item = {
+          id: "loc-" + Date.now(),
+          symbol: clean.length >= 32 ? clean.slice(0, 6).toUpperCase() : clean.toUpperCase(),
+          mint: clean.length >= 32 ? clean : null,
+          asset_type: assetType || "auto",
+          note: String(note || "").trim(),
+          alert_above: above,
+          alert_below: below,
+          alert_triggered_at: null,
+          status: "local",
+          bot_reply: "Sparad i din lokala bevakning. Tryck Kopiera för att skicka till botarna i chatten.",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+        writeLocalRequests([item].concat(list.filter((x) => x.symbol !== item.symbol)));
+        state.reqFormSym = "";
+        state.reqFormNote = "";
+        state.reqFormAbove = "";
+        state.reqFormBelow = "";
+        toast(`${item.symbol} sparad i lokal kö`);
+      }
+      refreshWatchQuotes(true);
+    } catch (e) {
+      state.reqError = (e && e.message) ? String(e.message) : "Kunde inte skicka förfrågan.";
+    } finally {
+      state.reqBusy = false;
+      render({ keepScroll: true });
+    }
   }
 
   $app.addEventListener("submit", (e) => {
+    const reqForm = e.target.closest("[data-req-form]");
+    if (reqForm) {
+      e.preventDefault();
+      const symEl = reqForm.querySelector("[name=symbol]");
+      const noteEl = reqForm.querySelector("[name=note]");
+      const aboveEl = reqForm.querySelector("[name=alert_above]");
+      const belowEl = reqForm.querySelector("[name=alert_below]");
+      state.reqFormSym = symEl ? symEl.value : "";
+      state.reqFormNote = noteEl ? noteEl.value : "";
+      state.reqFormAbove = aboveEl ? aboveEl.value : "";
+      state.reqFormBelow = belowEl ? belowEl.value : "";
+      submitWatchRequest(state.reqFormSym, state.reqFormType, state.reqFormNote, state.reqFormAbove, state.reqFormBelow);
+      return;
+    }
+    const editAlertForm = e.target.closest("[data-edit-alert-form]");
+    if (editAlertForm) {
+      e.preventDefault();
+      const id = editAlertForm.getAttribute("data-edit-alert-form");
+      const origin = editAlertForm.getAttribute("data-req-origin");
+      const above = parseAlertVal((editAlertForm.querySelector("[name=alert_above]") || {}).value);
+      const below = parseAlertVal((editAlertForm.querySelector("[name=alert_below]") || {}).value);
+      if (Number.isNaN(above) || Number.isNaN(below)) {
+        toast("Ogiltigt larmpris");
+        return;
+      }
+      if (origin === "local") {
+        const upd = readLocalRequests().map((x) => String(x.id) === String(id)
+          ? Object.assign({}, x, { alert_above: above, alert_below: below, alert_triggered_at: null, updated_at: new Date().toISOString() })
+          : x);
+        writeLocalRequests(upd);
+        state.reqEditId = null;
+        toast("Prislarm uppdaterat");
+        render({ keepScroll: true });
+      } else {
+        DeskAPI.updateRequest(id, { alert_above: above, alert_below: below }).then((res) => {
+          if (res && res.item && state.requests && state.requests.items) {
+            state.requests.items = state.requests.items.map((x) => String(x.id) === String(id) ? res.item : x);
+          }
+          state.reqEditId = null;
+          toast("Prislarm sparat");
+          render({ keepScroll: true });
+        }).catch(() => toast("Kunde inte spara prislarm"));
+      }
+      return;
+    }
+    const bridgeForm = e.target.closest("[data-bridge-form]");
+    if (bridgeForm) {
+      e.preventDefault();
+      const u = (bridgeForm.querySelector("[name=url]") || {}).value || "";
+      const t = (bridgeForm.querySelector("[name=token]") || {}).value || "";
+      if (DeskAPI.setBridge) DeskAPI.setBridge(u, t);
+      state.bridgeOpen = false;
+      toast(u ? "API-brygga sparad" : "API-brygga rensad");
+      render({ keepScroll: true });
+      return;
+    }
     const form = e.target.closest("[data-pass-form]");
     if (!form) return;
     e.preventDefault();
@@ -1752,15 +2147,22 @@
     });
   });
 
+  $app.addEventListener("input", (e) => {
+    const reqForm = e.target.closest("[data-req-form]");
+    if (!reqForm) return;
+    if (e.target.name === "symbol") state.reqFormSym = e.target.value;
+    if (e.target.name === "note") state.reqFormNote = e.target.value;
+    if (e.target.name === "alert_above") state.reqFormAbove = e.target.value;
+    if (e.target.name === "alert_below") state.reqFormBelow = e.target.value;
+  });
+
   $app.addEventListener("click", (e) => {
     const logout = e.target.closest("[data-action=logout]");
     if (logout) {
       e.preventDefault();
       DeskAPI.logout();
-      state.desk = null;
-      state.fun = null;
-      state.chart = null;
-      state.movers = null;
+      state.desk = null; state.fun = null; state.chart = null; state.movers = null;
+      state.moods = null; state.requests = null; state.universe = null;
       state.lockError = null;
       render({ keepScroll: false });
       return;
@@ -1771,6 +2173,93 @@
     if (nav) {
       e.preventDefault();
       go(nav.getAttribute("data-nav"));
+      return;
+    }
+    const moodBtn = e.target.closest("[data-mood-lane]");
+    if (moodBtn) {
+      e.preventDefault();
+      if (moodBtn.blur) moodBtn.blur();
+      const ln = moodBtn.getAttribute("data-mood-lane") || "memecoin";
+      state.moodLane = ln;
+      saveMoodLane(ln);
+      const card = document.getElementById("mood-lanes-card");
+      if (card && window.DeskFun && DeskFun.moodLanes) card.outerHTML = DeskFun.moodLanes(state.moods, ln);
+      else render({ keepScroll: true });
+      return;
+    }
+    const mktFilter = e.target.closest("[data-mkt-filter]");
+    if (mktFilter) {
+      e.preventDefault();
+      state.mktFilter = mktFilter.getAttribute("data-mkt-filter") || "all";
+      render({ keepScroll: true });
+      return;
+    }
+    const quickWatch = e.target.closest("[data-quick-watch]");
+    if (quickWatch) {
+      e.preventDefault();
+      const sym = quickWatch.getAttribute("data-quick-mint") || quickWatch.getAttribute("data-quick-watch") || "";
+      const tp = quickWatch.getAttribute("data-quick-type") || "auto";
+      state.reqFormSym = quickWatch.getAttribute("data-quick-watch") || sym;
+      state.reqFormType = tp;
+      submitWatchRequest(sym, tp, "");
+      return;
+    }
+    const fill = e.target.closest("[data-fill-sym]");
+    if (fill) {
+      e.preventDefault();
+      state.reqFormSym = fill.getAttribute("data-fill-sym") || "";
+      state.reqFormType = fill.getAttribute("data-fill-type") || "auto";
+      state.reqError = "";
+      render({ keepScroll: true });
+      return;
+    }
+    const reqType = e.target.closest("[data-req-type]");
+    if (reqType) {
+      e.preventDefault();
+      state.reqFormType = reqType.getAttribute("data-req-type") || "auto";
+      render({ keepScroll: true });
+      return;
+    }
+    const refreshBtn = e.target.closest("[data-refresh-quotes]");
+    if (refreshBtn) {
+      e.preventDefault();
+      refreshWatchQuotes(true);
+      return;
+    }
+    const editToggle = e.target.closest("[data-toggle-alert-edit]");
+    if (editToggle) {
+      e.preventDefault();
+      const id = editToggle.getAttribute("data-toggle-alert-edit") || "";
+      state.reqEditId = (!id || String(state.reqEditId || "") === String(id)) ? null : id;
+      render({ keepScroll: true });
+      return;
+    }
+    const copyReq = e.target.closest("[data-copy-req]");
+    if (copyReq) {
+      e.preventDefault();
+      const txt = copyReq.getAttribute("data-copy-req") || "";
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(txt).then(() => toast("Förfrågan kopierad")).catch(() => toast(txt));
+      } else { toast(txt); }
+      return;
+    }
+    const delReq = e.target.closest("[data-del-req]");
+    if (delReq) {
+      e.preventDefault();
+      const id = delReq.getAttribute("data-del-req");
+      const origin = delReq.getAttribute("data-req-origin");
+      if (origin === "local") {
+        writeLocalRequests(readLocalRequests().filter((x) => String(x.id) !== String(id)));
+        toast("Borttagen");
+        render({ keepScroll: true });
+      } else {
+        DeskAPI.deleteRequest(id).then(() => {
+          const cur = (state.requests && state.requests.items) || [];
+          state.requests = Object.assign({}, state.requests || {}, { items: cur.filter((x) => String(x.id) !== String(id)) });
+          toast("Borttagen");
+          render({ keepScroll: true });
+        }).catch(() => toast("Kunde inte ta bort just nu"));
+      }
       return;
     }
     const lb = e.target.closest("[data-lb]");
@@ -1841,11 +2330,14 @@
     const action = e.target.closest("[data-action]");
     if (!action) return;
     const act = action.getAttribute("data-action");
+    if (act === "toggle-bridge") { e.preventDefault(); state.bridgeOpen = !state.bridgeOpen; render({ keepScroll: true }); return; }
+    if (act === "clear-bridge") { e.preventDefault(); if (DeskAPI.setBridge) DeskAPI.setBridge("", ""); state.bridgeOpen = false; toast("API-brygga rensad"); render({ keepScroll: true }); return; }
     if (act === "login-again" || act === "retry") {
       e.preventDefault();
       if (DeskAPI.logout) DeskAPI.logout();
       state.desk = null; state.fun = null; state.chart = null; state.movers = null;
       state.live = null; state.activity = null; state.chatter = null;
+      state.moods = null; state.requests = null; state.universe = null;
       state.error = null; state.lockError = null;
       render({ keepScroll: false });
       return;
@@ -1895,9 +2387,11 @@
     DeskAPI.openStream({
       state(s) { state.desk = Object.assign(state.desk || {}, s); render({ keepScroll: true }); },
       activity(a) { if (a) { state.activity = a; if (state.route.name === "activity" || state.route.name === "live") render({ keepScroll: true }); } },
-      live(a) { if (a) { state.live = a; if (state.route.name === "home" || state.route.name === "live") render({ keepScroll: true }); } },
+      live(a) { if (a) { state.live = a; if (state.route.name === "live") render({ keepScroll: true }); } },
       chatter(a) { if (a) { state.chatter = a; if (state.route.name === "live") render({ keepScroll: true }); } },
-      tick() { /* snapshot poll refreshes Live-flödet varje minut */ }
+      moods(m) { if (m) { state.moods = m; if (state.route.name === "markets") render({ keepScroll: true }); } },
+      requests(rq) { if (rq) { state.requests = rq; if (state.route.name === "watch") render({ keepScroll: true }); } },
+      tick() { /* snapshot poll refreshes every minute */ }
     });
   };
   if (DeskAPI.tryRememberedUnlock) {

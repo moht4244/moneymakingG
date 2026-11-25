@@ -18,6 +18,56 @@
     return `<div class="ticker" aria-label="Priser senaste 24 h"><div class="ticker-track${reduced() ? " still" : ""}">${row}${reduced() ? "" : row}</div></div>`;
   }
 
+  const MOOD_LANES = [
+    ["memecoin", "Meme"],
+    ["majors", "Stora coins"],
+    ["gold", "Guld & råvaror"],
+    ["stocks", "Index & aktier"]
+  ];
+
+  function moodTimeSthlm(ts) {
+    if (!ts) return "";
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return "";
+    try {
+      return d.toLocaleTimeString("sv-SE", { timeZone: "Europe/Stockholm", hour: "2-digit", minute: "2-digit" });
+    } catch (_) {
+      return "";
+    }
+  }
+
+  function moodLanes(moodsObj, selectedLane) {
+    const lane = MOOD_LANES.some((x) => x[0] === selectedLane) ? selectedLane : "memecoin";
+    const chips = MOOD_LANES.map(([id, lab]) =>
+      `<button type="button" class="chip ${lane === id ? "on" : ""}" data-mood-lane="${id}">${h(lab)}</button>`
+    ).join("");
+    const m = moodsObj && moodsObj[lane];
+    let body = "";
+    if (!m || m.score == null) {
+      body = `<div class="muted small" style="padding:10px 0 4px">Ingen stämning just nu</div>`;
+    } else {
+      const score = Math.max(0, Math.min(100, Math.round(Number(m.score) || 0)));
+      const tone = score <= 34 ? "down" : score >= 66 ? "up" : "warn";
+      const label = m.label || (score <= 34 ? "Rädsla" : score >= 66 ? "Girighet" : "Neutral");
+      const srcs = Array.isArray(m.sources) ? m.sources.filter(Boolean) : [];
+      const tm = moodTimeSthlm(m.ts);
+      const cap = srcs.concat(tm ? [tm] : []).join(" · ");
+      body = `
+        <div class="mood-lane-head">
+          <div class="mood-lane-score nums"><span class="chg ${tone}">${score}/100</span> <span class="mood-lane-label">${h(label)}</span></div>
+          <span class="pnl-pill ${tone === "warn" ? "flat" : tone}">${h(label)}</span>
+        </div>
+        <div class="mood-lane-track"><span class="mood-lane-fill ${tone}" style="width:${Math.max(3, score)}%"></span></div>
+        ${m.why ? `<div class="mood-lane-why">${h(m.why)}</div>` : ""}
+        ${cap ? `<div class="mood-lane-cap">${h(cap)}</div>` : ""}`;
+    }
+    return `<div class="card fun-card" id="mood-lanes-card">
+      <div class="card-h">Marknadens stämning per del</div>
+      <div class="filters mood-chips" style="margin:0 0 10px">${chips}</div>
+      ${body}
+    </div>`;
+  }
+
   function mood(m) {
     if (!m) return "";
     const pos = Math.max(2, Math.min(98, m.score));
@@ -170,6 +220,6 @@
     if (fresh.length && global.DeskToast) global.DeskToast(`🏅 Nytt märke: ${fresh[0].emoji} ${fresh[0].name}`);
   }
 
-  global.DeskFun = { laneGauge, laneHistory, ticker, chatPage, mood, streakChip, week, meme, chat, leaderboard, badges, soundToggle, checkWins, checkBadges, celebrate,
+  global.DeskFun = { moodLanes, laneGauge, laneHistory, ticker, chatPage, mood, streakChip, week, meme, chat, leaderboard, badges, soundToggle, checkWins, checkBadges, celebrate,
                      toggleSound() { LS.set("mmg_sound", LS.get("mmg_sound", "on") === "on" ? "off" : "on"); } };
 })(window);

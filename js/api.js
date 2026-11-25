@@ -40,6 +40,29 @@
 (function (global) {
   const TOKEN_KEY = "APP_TOKEN";
   const REMEMBER_KEY = "MMG_SNAP_KEY_V2";
+  const BRIDGE_URL_KEY = "MMG_BRIDGE_URL";
+  const BRIDGE_TOK_KEY = "MMG_BRIDGE_TOKEN";
+
+  function getBridge() {
+    try {
+      const url = String(localStorage.getItem(BRIDGE_URL_KEY) || "").trim().replace(/\/+$/, "");
+      const token = String(localStorage.getItem(BRIDGE_TOK_KEY) || "").trim();
+      return { url, token };
+    } catch (_) {
+      return { url: "", token: "" };
+    }
+  }
+
+  function setBridge(url, token) {
+    try {
+      const u = String(url || "").trim().replace(/\/+$/, "");
+      const t = String(token || "").trim();
+      if (u) localStorage.setItem(BRIDGE_URL_KEY, u);
+      else localStorage.removeItem(BRIDGE_URL_KEY);
+      if (t) localStorage.setItem(BRIDGE_TOK_KEY, t);
+      else localStorage.removeItem(BRIDGE_TOK_KEY);
+    } catch (_) {}
+  }
 
   function setToken(value) {
     try {
@@ -105,6 +128,10 @@
 
   function usesSnapshot() {
     return onHostedPages() || /^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
+  }
+
+  function isSnapshotOnly() {
+    return onHostedPages() || (usesSnapshot() && !getToken());
   }
 
   function isUnlocked() {
@@ -379,6 +406,9 @@
     if (u === "/api/graduation" || u === "api/graduation") return s.graduation || (s.state && s.state.graduation) || {};
     if (u === "/api/live" || u === "api/live") return s.live || s.activity || { items: [] };
     if (u === "/api/chatter" || u === "api/chatter") return s.chatter || { items: [] };
+    if (u === "/api/moods" || u === "api/moods") return s.moods || {};
+    if (u === "/api/requests" || u === "api/requests") return { items: s.requests || [], watching: (s.state && s.state.watching) || [] };
+    if (u === "/api/universe" || u === "api/universe") return { items: (s.assets && s.assets.universe) || [], perps: (s.assets && s.assets.perps) || [] };
     const coinM = u.match(/^(?:\/)?api\/coin\/(.+)$/);
     if (coinM) return coinFromSnap(decodeURIComponent(coinM[1]));
     const auditM = u.match(/^(?:\/)?api\/audit\/(.+)$/);
@@ -569,6 +599,9 @@
     if (u.indexOf("ticker") >= 0) return { items: [] };
     if (u.indexOf("fun") >= 0) return { mode: "PAPER", leaderboard: [], streak: { current: 0, best: 0 }, badges: [], week: {}, meme: null, chat: [], mood: null, wins: [] };
     if (u.indexOf("lanes") >= 0) return { health: null, history: [] };
+    if (u.indexOf("requests") >= 0) return { items: [], watching: [] };
+    if (u.indexOf("universe") >= 0) return { items: [], perps: [] };
+    if (u.indexOf("moods") >= 0) return {};
     return {};
   }
 
@@ -677,10 +710,199 @@
       return liveGet("/api/chatter");
     },
 
+    async getMoods() {
+      return liveGet("/api/moods");
+    },
+
+    async getUniverse() {
+      return liveGet("/api/universe");
+    },
+
+    async getRequests() {
+      return liveGet("/api/requests");
+    },
+
+    getBridge,
+    setBridge,
+
+    canWriteRemote() {
+      const b = getBridge();
+      if (b.url && b.token) return true;
+      return !isSnapshotOnly() && !!getToken();
+    },
+
+    async submitRequest(payload) {
+      const b = getBridge();
+      const useBridge = isSnapshotOnly() || (b.url && b.token);
+      if (isSnapshotOnly() && !(b.url && b.token)) {
+        return { ok: false, mode: "hosted_local" };
+      }
+      const target = useBridge && b.url ? (b.url + "/api/requests") : apiUrl("/api/requests");
+      const h = { "Content-Type": "application/json", Accept: "application/json" };
+      const tok = (useBridge && b.token) ? b.token : getToken();
+      if (tok) { h["Authorization"] = "Bearer " + tok; h["X-App-Token"] = tok; }
+      const res = await fetch(target, { method: "POST", headers: h, body: JSON.stringify(payload || {}) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const err = new Error(data.detail || ("HTTP " + res.status));
+        err.status = res.status;
+        throw err;
+      }
+      return data;
+    },
+
+    async deleteRequest(id) {
+      const b = getBridge();
+      if (isSnapshotOnly() && !(b.url && b.token)) {
+        return { ok: false, mode: "hosted_local" };
+      }
+      const useBridge = isSnapshotOnly() || (b.url && b.token);
+      const target = useBridge && b.url ? (b.url + "/api/requests/" + encodeURIComponent(id)) : apiUrl("/api/requests/" + encodeURIComponent(id));
+      const h = { Accept: "application/json" };
+      const tok = (useBridge && b.token) ? b.token : getToken();
+      if (tok) { h["Authorization"] = "Bearer " + tok; h["X-App-Token"] = tok; }
+      const res = await fetch(target, { method: "DELETE", headers: h });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return res.json();
+    },
+
+    async updateRequest(id, payload) {
+      const b = getBridge();
+      if (isSnapshotOnly() && !(b.url && b.token)) {
+        return { ok: false, mode: "hosted_local" };
+      }
+      const useBridge = isSnapshotOnly() || (b.url && b.token);
+      const target = useBridge && b.url ? (b.url + "/api/requests/" + encodeURIComponent(id)) : apiUrl("/api/requests/" + encodeURIComponent(id));
+      const h = { "Content-Type": "application/json", Accept: "application/json" };
+      const tok = (useBridge && b.token) ? b.token : getToken();
+      if (tok) { h["Authorization"] = "Bearer " + tok; h["X-App-Token"] = tok; }
+      const res = await fetch(target, { method: "PATCH", headers: h, body: JSON.stringify(payload || {}) });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const err = new Error(data.detail || ("HTTP " + res.status));
+        err.status = res.status;
+        throw err;
+      }
+      return data;
+    },
+
+    async refreshRequests() {
+      const b = getBridge();
+      if (isSnapshotOnly() && !(b.url && b.token)) {
+        return { ok: false, mode: "hosted_local" };
+      }
+      const useBridge = isSnapshotOnly() || (b.url && b.token);
+      const target = useBridge && b.url ? (b.url + "/api/requests/refresh") : apiUrl("/api/requests/refresh");
+      const h = { Accept: "application/json" };
+      const tok = (useBridge && b.token) ? b.token : getToken();
+      if (tok) { h["Authorization"] = "Bearer " + tok; h["X-App-Token"] = tok; }
+      const res = await fetch(target, { method: "POST", headers: h });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      return res.json();
+    },
+
+    async fetchPublicQuotes(items) {
+      const list = Array.isArray(items) ? items : [];
+      if (!list.length) return {};
+      const out = {};
+      const mints = [];
+      list.forEach((it) => {
+        const m = it && (it.mint || it.resolved_mint);
+        if (m && mints.indexOf(m) < 0) mints.push(m);
+      });
+      if (mints.length) {
+        try {
+          const r = await fetch("https://api.dexscreener.com/latest/dex/tokens/" + encodeURIComponent(mints.slice(0, 25).join(",")), { cache: "no-store" });
+          if (r.ok) {
+            const j = await r.json();
+            const byMint = {};
+            ((j && j.pairs) || []).forEach((p) => {
+              const addr = p && p.baseToken && p.baseToken.address;
+              const px = p && p.priceUsd ? Number(p.priceUsd) : 0;
+              if (!addr || !px) return;
+              const liq = Number((p.liquidity && p.liquidity.usd) || 0);
+              if (!byMint[addr] || liq > byMint[addr].liq) {
+                const chg = p.priceChange && p.priceChange.h24 != null ? Number(p.priceChange.h24) : null;
+                byMint[addr] = { price: px, change_24h: isFinite(chg) ? chg : null, source: "dexscreener", liq: liq, mint: addr };
+              }
+            });
+            Object.keys(byMint).forEach((m) => { out["M:" + m] = byMint[m]; });
+          }
+        } catch (_) {}
+      }
+      const needSym = list.filter((it) => {
+        const m = it && (it.mint || it.resolved_mint);
+        return !(m && out["M:" + m]);
+      });
+      let hlMap = {};
+      if (needSym.length) {
+        const hlReqs = [{ type: "metaAndAssetCtxs" }, { type: "metaAndAssetCtxs", dex: "xyz" }];
+        await Promise.all(hlReqs.map(async (body) => {
+          try {
+            const r = await fetch("https://api.hyperliquid.xyz/info", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body)
+            });
+            if (!r.ok) return;
+            const d = await r.json();
+            if (!Array.isArray(d) || d.length < 2) return;
+            const univ = (d[0] && d[0].universe) || [];
+            const ctxs = d[1] || [];
+            univ.forEach((u, i) => {
+              const nm = String((u && u.name) || "").toUpperCase().split(":").pop();
+              const c = ctxs[i];
+              if (!nm || !c) return;
+              const px = Number(c.markPx || c.midPx || 0);
+              if (!isFinite(px) || px <= 0) return;
+              const prev = Number(c.prevDayPx || 0);
+              const chg = prev > 0 ? ((px - prev) / prev) * 100 : null;
+              hlMap[nm] = { price: px, change_24h: isFinite(chg) ? chg : null, source: "hyperliquid" };
+            });
+          } catch (_) {}
+        }));
+        const unresolved = [];
+        needSym.forEach((it) => {
+          const sym = String((it && it.symbol) || "").toUpperCase();
+          if (!sym) return;
+          if (hlMap[sym]) {
+            out["S:" + sym] = hlMap[sym];
+          } else if ((it.asset_type || "auto") !== "stock" && unresolved.indexOf(sym) < 0) {
+            unresolved.push(sym);
+          }
+        });
+        await Promise.all(unresolved.slice(0, 6).map(async (sym) => {
+          try {
+            const r = await fetch("https://api.dexscreener.com/latest/dex/search?q=" + encodeURIComponent(sym), { cache: "no-store" });
+            if (!r.ok) return;
+            const j = await r.json();
+            const matches = ((j && j.pairs) || []).filter((p) =>
+              p && p.baseToken && String(p.baseToken.symbol || "").toUpperCase() === sym && Number(p.priceUsd) > 0
+            );
+            if (!matches.length) return;
+            matches.sort((a, b) => {
+              const sa = (a.chainId === "solana" ? 1 : 0) - (b.chainId === "solana" ? 1 : 0);
+              if (sa !== 0) return -sa;
+              return Number((b.liquidity && b.liquidity.usd) || 0) - Number((a.liquidity && a.liquidity.usd) || 0);
+            });
+            const p = matches[0];
+            const chg = p.priceChange && p.priceChange.h24 != null ? Number(p.priceChange.h24) : null;
+            out["S:" + sym] = {
+              price: Number(p.priceUsd),
+              change_24h: isFinite(chg) ? chg : null,
+              source: "dexscreener",
+              mint: p.chainId === "solana" && p.baseToken ? p.baseToken.address : null
+            };
+          } catch (_) {}
+        }));
+      }
+      return out;
+    },
+
     assetLink,
 
     openStream(handlers) {
-      if (isUnlocked() || onHostedPages()) {
+      if (isUnlocked() || isSnapshotOnly()) {
         if (!isUnlocked()) return { close() {} };
         startSnapRefresh();
         const id = setInterval(() => {
@@ -690,6 +912,8 @@
             if (handlers.activity && s.activity) handlers.activity(s.activity);
             if (handlers.live && (s.live || s.activity)) handlers.live(s.live || s.activity);
             if (handlers.chatter && s.chatter) handlers.chatter(s.chatter);
+            if (handlers.moods && s.moods) handlers.moods(s.moods);
+            if (handlers.requests && s.requests) handlers.requests({ items: s.requests, watching: (s.state && s.state.watching) || [] });
             if (handlers.tick) handlers.tick({ ts: Date.now() });
           }).catch(() => {});
         }, 60000);
