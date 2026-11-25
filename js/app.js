@@ -1043,7 +1043,7 @@
       .slice()
       .sort((x, y) => {
         const ta = parseTs(x && x.ts), tb = parseTs(y && y.ts);
-        return (ta ? ta.getTime() : 0) - (tb ? tb.getTime() : 0);
+        return (tb ? tb.getTime() : 0) - (ta ? ta.getTime() : 0);
       });
     const bots = [];
     const seen = new Set();
@@ -1092,7 +1092,7 @@
       <div class="filters bot-filters">
         ${botChips.map(([id, lab]) => `<button data-bot-filter="${h(id)}" class="${(state.liveBotFilter || "all") === id ? "on" : ""}">${h(lab)}</button>`).join("")}
       </div>
-      ${filtered.length ? `<div class="live-chat" id="chat-feed">${html}</div>` : emptyView("Inget snack än", "När botarna kollar läget eller frågar varandra syns det här.")}
+      ${filtered.length ? `<div class="live-chat" id="live-chat-feed">${html}</div>` : emptyView("Inget snack än", "När botarna kollar läget eller frågar varandra syns det här.")}
     </div></div>`;
   }
 
