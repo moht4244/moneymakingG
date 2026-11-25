@@ -978,10 +978,12 @@
       if (!it) return;
       const text = (it.text || it.title || it.body || "").trim();
       if (!text) return;
-      const id = String(it.id != null ? it.id : text + ":" + (it.ts || ""));
-      if (seen.has(id)) return;
-      seen.add(id);
+      const rawId = String(it.id != null ? it.id : "").replace(/^[ae]:/, "");
       const bot = it.from_bot || it.bot;
+      const id = rawId || (bot + "|" + text + "|" + (it.ts || ""));
+      if (seen.has(id) || seen.has(bot + "|" + text)) return;
+      seen.add(id);
+      seen.add(bot + "|" + text);
       out.push({
         id, ts: it.ts, kind: (it.kind || "system"),
         from_bot: bot, to_bot: it.to_bot, text,
@@ -991,8 +993,10 @@
     };
     ((state.chatter && state.chatter.items) || []).forEach(push);
     ((state.live && state.live.items) || []).forEach(push);
-    ((state.activity && state.activity.items) || []).forEach(push);
-    ((state.fun && state.fun.chat) || []).forEach(push);
+    if (!out.length) {
+      ((state.activity && state.activity.items) || []).forEach(push);
+      ((state.fun && state.fun.chat) || []).forEach(push);
+    }
     return out;
   }
 
