@@ -1,5 +1,5 @@
 /* Moneymaking G service worker — cache static shell, always network for /api/ */
-const CACHE = "moneymaking-g-v5";
+const CACHE = "moneymaking-g-v6";
 const PRECACHE = [
   "./",
   "./index.html",

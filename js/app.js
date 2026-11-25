@@ -241,10 +241,13 @@
       </a>`).join("")}</nav>`;
   }
 
-  function tokenForm() {
-    return `<form data-token-form class="token-form" autocomplete="off">
-      <input type="password" name="token" autocomplete="off" spellcheck="false" placeholder="App-token" aria-label="App-token">
-      <button type="submit" class="btn btn-primary">Öppna</button>
+  function passcodeForm(err) {
+    const msg = err ? `<p class="lock-error">${h(err)}</p>` : "";
+    return `<form data-pass-form class="token-form" autocomplete="off">
+      <input type="password" name="code" autocomplete="current-password" spellcheck="false" placeholder="Din kod" aria-label="Din kod">
+      <label class="remember"><input type="checkbox" name="remember"> Kom ihåg på den här enheten</label>
+      ${msg}
+      <button type="submit" class="btn btn-primary" data-pass-submit>Öppna</button>
     </form>`;
   }
 
@@ -783,7 +786,7 @@
   function renderAccount() {
     const d = state.desk;
     const wallet = (d && d.wallet) || { address: "—", label: "Phantom-plånbok (botens)" };
-    const token = DeskAPI.getToken();
+    const unlocked = DeskAPI.isUnlocked && DeskAPI.isUnlocked();
     const mode = (d && d.mode) || "PAPER";
     return `${topbar({ title: "Konto" })}
     <div class="screen"><div class="page">
@@ -807,8 +810,8 @@
       <div class="card">
         <div class="row"><div class="row-body"><div class="row-title">Läge</div></div><div class="row-meta">${pillPaperOrLive(mode)}</div></div>
         <div class="row"><div class="row-body"><div class="row-title">Schema</div></div><div class="row-meta">${h((d && d.schedule) || "24/7")}</div></div>
-        <div class="row"><div class="row-body"><div class="row-title">Anslutning</div></div><div class="row-meta tiny">${token ? "Inloggad" : "Ingen app-token"}</div></div>
-        ${token ? "" : `<div style="padding:8px 16px 16px">${tokenForm()}</div>`}
+        <div class="row"><div class="row-body"><div class="row-title">Anslutning</div></div><div class="row-meta tiny">${unlocked ? "Inloggad" : "Utloggad"}</div></div>
+        ${unlocked ? `<div class="row"><div class="row-body"><div class="row-title">Session</div><div class="row-sub">Koden sparas inte. Du kan logga ut härifrån.</div></div><button type="button" class="copy-btn" data-action="logout">Logga ut</button></div>` : ""}
         <div class="row"><div class="row-body"><div class="row-title">Notiser</div><div class="row-sub">Notis vid köp, sälj och stopp</div></div>
           <button class="copy-btn" data-action="notify">Slå på</button>
         </div>
@@ -826,8 +829,8 @@
     return `<div class="lock">
       <div class="mark" style="width:72px;height:72px;border-radius:20px;overflow:hidden;border:0.5px solid var(--sep)"><img src="apple-touch-icon.png" alt="" width="72" height="72"></div>
       <h2>Logga in i Moneymaking G</h2>
-      <p>Öppna länken som slutar med <span class="nums">#t=</span> – då sparas din app-token på telefonen. Du kan också klistra in token här.</p>
-      ${tokenForm()}
+      <p>Skriv din kod för att öppna appen.</p>
+      ${passcodeForm(state.lockError)}
     </div>`;
   }
 
@@ -868,7 +871,7 @@
     const keep = !(opts && opts.keepScroll === false);
     const snap = keep ? captureScroll() : null;
     const route = state.route;
-    const needsAuth = !DeskAPI.getToken() && route.name !== "account";
+    const needsAuth = !(DeskAPI.isUnlocked && DeskAPI.isUnlocked());
     let body;
     if (needsAuth) body = renderLock();
     else if (route.name === "coin") body = renderCoin();
@@ -1004,7 +1007,7 @@
       render();
     } catch (err) {
       state.loading = false;
-      state.error = err && err.status === 401 ? "Den app-token godkändes inte." :
+      state.error = err && err.status === 401 ? "Fel kod, eller så gick sessionen ut." :
         err && err.status === 404 ? "Inget hittades för den här skärmen." :
         (err && err.message) || "Nätverksfel.";
       render();
@@ -1023,21 +1026,48 @@
   }
 
   $app.addEventListener("submit", (e) => {
-    const form = e.target.closest("[data-token-form]");
+    const form = e.target.closest("[data-pass-form]");
     if (!form) return;
     e.preventDefault();
-    const input = form.querySelector("[name=token]");
-    const val = input && input.value ? String(input.value).trim() : "";
-    if (!val) return;
-    DeskAPI.setToken(val);
-    if (input) input.value = "";
-    state.error = null;
-    state.loading = true;
-    render({ keepScroll: false });
-    loadRoute();
+    const input = form.querySelector("[name=code]");
+    const remember = !!(form.querySelector("[name=remember]") && form.querySelector("[name=remember]").checked);
+    const val = input && input.value ? String(input.value) : "";
+    if (!val) {
+      state.lockError = "Skriv din kod först.";
+      render({ keepScroll: false });
+      return;
+    }
+    const btn = form.querySelector("[data-pass-submit]");
+    if (btn) { btn.disabled = true; btn.textContent = "Kollar koden…"; }
+    state.lockError = null;
+    DeskAPI.unlockWithPasscode(val, remember).then(() => {
+      if (input) input.value = "";
+      state.error = null;
+      state.loading = true;
+      state.lockError = null;
+      render({ keepScroll: false });
+      loadRoute();
+    }).catch((err) => {
+      state.lockError = (err && err.code === "bad_passcode")
+        ? "Fel kod. Försök igen."
+        : "Kunde inte öppna just nu. Försök igen om en stund.";
+      render({ keepScroll: false });
+    });
   });
 
   $app.addEventListener("click", (e) => {
+    const logout = e.target.closest("[data-action=logout]");
+    if (logout) {
+      e.preventDefault();
+      DeskAPI.logout();
+      state.desk = null;
+      state.fun = null;
+      state.chart = null;
+      state.movers = null;
+      state.lockError = null;
+      render({ keepScroll: false });
+      return;
+    }
     const rawHref = e.target.closest("a");
     if (rawHref && (rawHref.getAttribute("href") === "#" || rawHref.getAttribute("href") === "")) e.preventDefault();
     const nav = e.target.closest("[data-nav]");
@@ -1136,15 +1166,22 @@
 
   DeskAPI.captureTokenFromUrl();
   state.route = parseRoute();
-  render();
-  loadRoute();
-  DeskAPI.openStream({
-    state(s) { state.desk = Object.assign(state.desk || {}, s); render(); },
-    activity() { /* stay put; user can refresh the feed */ },
-    tick() {
-      if (state.route.name === "home" && document.getElementById("desk-screen")) {
-        document.getElementById("desk-screen").src = DeskAPI.screenUrl();
+  const boot = () => {
+    render();
+    loadRoute();
+    DeskAPI.openStream({
+      state(s) { state.desk = Object.assign(state.desk || {}, s); render(); },
+      activity() { /* stay put; user can refresh the feed */ },
+      tick() {
+        if (state.route.name === "home" && document.getElementById("desk-screen")) {
+          document.getElementById("desk-screen").src = DeskAPI.screenUrl();
+        }
       }
-    }
-  });
+    });
+  };
+  if (DeskAPI.tryRememberedUnlock) {
+    DeskAPI.tryRememberedUnlock().catch(() => false).then(boot);
+  } else {
+    boot();
+  }
 })();

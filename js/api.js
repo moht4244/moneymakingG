@@ -1,8 +1,9 @@
 /* STEP 8 client.
  *
- * Auth: APP_TOKEN is stored in localStorage after a #t= link is opened.
- * Requests send Authorization: Bearer and X-App-Token.
- * EventSource cannot set headers, so /api/stream?token= is used.
+ * Auth (hosted): the user types their app code on the lock screen. The code is
+ * used only to derive an AES key (PBKDF2-SHA256) and is never written to storage.
+ * Optional 'remember this device' stores the derived key, not the code.
+ * Local /api requests may still send a bearer token if one is present.
  *
  * Endpoints (shapes the UI reads; extra fields are ignored):
  *
@@ -38,6 +39,7 @@
  */
 (function (global) {
   const TOKEN_KEY = "APP_TOKEN";
+  const REMEMBER_KEY = "MMG_SNAP_KEY_V2";
 
   function setToken(value) {
     try {
@@ -45,10 +47,6 @@
       if (v) localStorage.setItem(TOKEN_KEY, v);
       else localStorage.removeItem(TOKEN_KEY);
     } catch (_) {}
-    snapKey = null;
-    snapKeySig = "";
-    snapCache = null;
-    if (value && onHostedPages && onHostedPages()) loadSnap().catch(() => {});
   }
 
   function clearToken() {
@@ -56,21 +54,14 @@
   }
 
   function captureTokenFromUrl() {
+    // #t= is no longer a login secret; strip a leftover fragment so it does not linger in the URL.
     const hash = location.hash || "";
-    const qs = new URLSearchParams(location.search);
-    let token = null;
     const m = hash.match(/^#t=([^&]+)/);
-    if (m) token = decodeURIComponent(m[1]);
-    if (!token && qs.get("t")) token = qs.get("t");
-    if (token) {
-      try { localStorage.setItem(TOKEN_KEY, token); } catch (_) {}
-      if (m) {
-        const rest = hash.slice(m[0].length).replace(/^&/, "");
-        const next = rest.startsWith("/") ? "#" + rest : (rest ? "#" + rest : "#/home");
-        history.replaceState(null, "", location.pathname + location.search + (next === "#" ? "#/home" : next));
-      }
+    if (m) {
+      const rest = hash.slice(m[0].length).replace(/^&/, "");
+      const next = rest.startsWith("/") ? "#" + rest : (rest ? "#" + rest : "#/home");
+      history.replaceState(null, "", location.pathname + location.search + (next === "#" ? "#/home" : next));
     }
-    return getToken();
   }
 
   function getToken() {
@@ -97,12 +88,20 @@
   const SNAP_API = "https://api.github.com/repos/moht4244/moneymakingG/contents/snap.enc?ref=data";
   let snapCache = null;
   let snapKey = null;
-  let snapKeySig = "";
+  let unlocked = false;
   let snapTimer = 0;
   let snapInflight = null;
 
   function onHostedPages() {
     return /\.github\.io$/i.test(location.hostname);
+  }
+
+  function usesSnapshot() {
+    return onHostedPages() || /^(localhost|127\.0\.0\.1)$/i.test(location.hostname);
+  }
+
+  function isUnlocked() {
+    return unlocked && !!snapKey;
   }
 
   function b64ToBytes(s) {
@@ -112,49 +111,104 @@
     return out;
   }
 
-  async function snapDeriveKey(token, saltB64, iter) {
-    const sig = token + "|" + saltB64 + "|" + String(iter);
-    if (snapKey && snapKeySig === sig) return snapKey;
-    const enc = new TextEncoder();
-    const base = await crypto.subtle.importKey("raw", enc.encode(token), "PBKDF2", false, ["deriveKey"]);
-    const key = await crypto.subtle.deriveKey(
-      { name: "PBKDF2", hash: "SHA-256", salt: b64ToBytes(saltB64), iterations: iter || 100000 },
-      base,
-      { name: "AES-GCM", length: 256 },
-      false,
-      ["decrypt"]
-    );
-    snapKey = key;
-    snapKeySig = sig;
-    return key;
+  async function fetchSnapEnv() {
+    try {
+      const r = await fetch(SNAP_RAW + "?t=" + Date.now(), { cache: "no-store" });
+      if (r.ok) return await r.json();
+    } catch (_) {}
+    const r = await fetch(SNAP_API + "&t=" + Date.now(), { cache: "no-store", headers: { Accept: "application/vnd.github+json" } });
+    if (!r.ok) {
+      const err = new Error("HTTP " + r.status);
+      err.status = r.status;
+      throw err;
+    }
+    const j = await r.json();
+    const text = atob(String(j.content || "").replace(/\n/g, ""));
+    return JSON.parse(text);
   }
 
-  async function decryptSnap(env, token) {
-    const key = await snapDeriveKey(token, env.salt, env.iter);
+  async function snapDeriveKey(secret, saltB64, iter) {
+    const enc = new TextEncoder();
+    const base = await crypto.subtle.importKey("raw", enc.encode(secret), "PBKDF2", false, ["deriveKey"]);
+    return crypto.subtle.deriveKey(
+      { name: "PBKDF2", hash: "SHA-256", salt: b64ToBytes(saltB64), iterations: iter || 800000 },
+      base,
+      { name: "AES-GCM", length: 256 },
+      true,
+      ["decrypt"]
+    );
+  }
+
+  async function decryptWithKey(env, key) {
     const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64ToBytes(env.iv) }, key, b64ToBytes(env.ct));
     return JSON.parse(new TextDecoder().decode(pt));
   }
 
+  async function unlockWithPasscode(secret, remember) {
+    const env = await fetchSnapEnv();
+    const key = await snapDeriveKey(secret, env.salt, env.iter);
+    try {
+      snapCache = await decryptWithKey(env, key);
+    } catch (_) {
+      const err = new Error("bad_passcode");
+      err.code = "bad_passcode";
+      throw err;
+    }
+    snapKey = key;
+    unlocked = true;
+    try {
+      if (remember) {
+        const jwk = await crypto.subtle.exportKey("jwk", key);
+        localStorage.setItem(REMEMBER_KEY, JSON.stringify({ v: 2, kdf: "PBKDF2", iter: env.iter, salt: env.salt, key: jwk }));
+      } else {
+        localStorage.removeItem(REMEMBER_KEY);
+      }
+    } catch (_) {}
+    startSnapRefresh();
+    return snapCache;
+  }
+
+  async function tryRememberedUnlock() {
+    let stored = null;
+    try { stored = JSON.parse(localStorage.getItem(REMEMBER_KEY) || ""); } catch (_) { stored = null; }
+    if (!stored || !stored.key) return false;
+    try {
+      const env = await fetchSnapEnv();
+      if (stored.salt !== env.salt || Number(stored.iter) !== Number(env.iter)) {
+        localStorage.removeItem(REMEMBER_KEY);
+        return false;
+      }
+      const key = await crypto.subtle.importKey("jwk", stored.key, { name: "AES-GCM" }, true, ["decrypt"]);
+      snapCache = await decryptWithKey(env, key);
+      snapKey = key;
+      unlocked = true;
+      startSnapRefresh();
+      return true;
+    } catch (_) {
+      try { localStorage.removeItem(REMEMBER_KEY); } catch (__) {}
+      return false;
+    }
+  }
+
+  function logout() {
+    unlocked = false;
+    snapKey = null;
+    snapCache = null;
+    try { localStorage.removeItem(REMEMBER_KEY); } catch (_) {}
+  }
+
   async function loadSnap() {
+    if (!snapKey) return null;
     if (snapInflight) return snapInflight;
-    const token = getToken();
-    if (!token) return null;
     snapInflight = (async () => {
       try {
-        let env = null;
-        try {
-          const r = await fetch(SNAP_RAW + "?t=" + Date.now(), { cache: "no-store" });
-          if (r.ok) env = await r.json();
-        } catch (_) {}
-        if (!env) {
-          const r = await fetch(SNAP_API + "&t=" + Date.now(), { cache: "no-store", headers: { Accept: "application/vnd.github+json" } });
-          if (!r.ok) throw new Error("HTTP " + r.status);
-          const j = await r.json();
-          const text = atob(String(j.content || "").replace(/\n/g, ""));
-          env = JSON.parse(text);
-        }
-        snapCache = await decryptSnap(env, token);
+        const env = await fetchSnapEnv();
+        snapCache = await decryptWithKey(env, snapKey);
         return snapCache;
+      } catch (e) {
+        // Salt rotation or a bad stored key — ask for the code again.
+        logout();
+        throw e;
       } finally {
         snapInflight = null;
       }
@@ -163,8 +217,8 @@
   }
 
   function startSnapRefresh() {
-    if (snapTimer || !onHostedPages()) return;
-    snapTimer = setInterval(() => { loadSnap().catch(() => {}); }, 60000);
+    if (snapTimer) return;
+    snapTimer = setInterval(() => { if (isUnlocked()) loadSnap().catch(() => {}); }, 60000);
   }
 
   function fromSnap(path) {
@@ -207,12 +261,16 @@
   }
 
   async function liveGet(path) {
-    if (onHostedPages()) {
+    if (isUnlocked()) {
       startSnapRefresh();
       if (!snapCache) await loadSnap();
       const hit = fromSnap(path);
       if (hit != null) return hit;
-      throw new Error("HTTP 404");
+      if (onHostedPages()) throw new Error("HTTP 404");
+    } else if (onHostedPages()) {
+      const err = new Error("HTTP 401");
+      err.status = 401;
+      throw err;
     }
     const res = await fetch(apiUrl(path), { headers: headers(), cache: "no-store" });
     if (!res.ok) {
@@ -228,6 +286,11 @@
     getToken,
     setToken,
     clearToken,
+    isUnlocked,
+    unlockWithPasscode,
+    tryRememberedUnlock,
+    logout,
+    onHostedPages,
 
     async getFun(period) {
       return liveGet("/api/fun?period=" + encodeURIComponent(period || "vecka"));
@@ -288,7 +351,7 @@
     },
 
     openStream(handlers) {
-      if (onHostedPages()) {
+      if (isUnlocked()) {
         startSnapRefresh();
         const id = setInterval(() => {
           loadSnap().then((s) => { if (s && handlers.state) handlers.state(s.state); if (s && handlers.tick) handlers.tick({ ts: Date.now() }); }).catch(() => {});

@@ -777,3 +777,7 @@ a.chat-card:active { opacity: 0.88; }
 #risk-meter .risk-track span.warn { background: #FFD60A; }
 #risk-meter .risk-track span.bad { background: #FF453A; }
 #risk-meter .risk-note { margin: 0; padding: 2px 16px 14px; font-size: 13px; color: var(--secondary); line-height: 1.4; }
+
+.lock .remember { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--secondary); font-weight: 500; }
+.lock .remember input { width: 18px; height: 18px; accent-color: var(--blue); }
+.lock-error { margin: 0; color: #FF453A; font-size: 14px; font-weight: 600; line-height: 1.4; }
