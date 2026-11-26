@@ -360,6 +360,17 @@
       checkBlock = `<div class="tiny" style="padding:12px 16px">Säkerhetslagren (mint, frys, LP, honeypot) gäller memecoins. Här visas signalerna under Varför godkänd.</div>`;
     }
 
+    const sk = (s && s.skeptic) || null;
+    const skSummary = (sk && sk.summary) || (isMeme ? "Skeptikern: ingen bedömning än" : "");
+    let skepticLine = "";
+    if (isMeme || sk) {
+      const skOk = sk && sk.ok === true;
+      const skNo = sk && sk.ok === false;
+      const skCls = skOk ? "pass" : (skNo ? "fail" : "warn");
+      const skWord = skOk ? "Godkänd" : (skNo ? "Sa nej" : "—");
+      skepticLine = `<div class="row"><div class="row-body"><div class="row-title">Skeptikern</div><div class="row-sub">${h(skSummary)}</div></div><div class="row-meta ${skCls}">${h(skWord)}</div></div>`;
+    }
+
     let scoreLine = "";
     if (score && score.value != null) {
       const ok = score.pass === true || (score.pass == null && Number(score.value) >= Number(minScore));
@@ -401,6 +412,7 @@
     return `
       <div class="card safety-card" id="coin-safety">
         <div class="card-h">Säkerhetskontroll <span class="safety-verdict ${cls}">${h(verdictLabel)}</span></div>
+        ${skepticLine}
         ${scoreLine}
         ${checkBlock}
       </div>
