@@ -409,10 +409,31 @@
           <div class="row-body"><div class="row-title">Visa hela rapporten</div></div>
         </a>` : "";
 
+    const ai = (s && s.ai_review) || null;
+    let aiLine = "";
+    if (ai) {
+      const aiOk = ai.ok === true;
+      const aiNo = ai.ok === false;
+      const aiCls = aiOk ? "pass" : (aiNo ? "fail" : "warn");
+      const aiWord = aiOk ? "Godkänd" : (aiNo ? "Sa nej" : "—");
+      const parts = [ai.grok_label, ai.claude_label].filter(Boolean);
+      const aiSub = parts.length ? parts.join(" · ") : (ai.summary || "Ingen AI-bedömning än");
+      aiLine = `<div class="row"><div class="row-body"><div class="row-title">AI-granskning</div><div class="row-sub">${h(aiSub)}</div></div><div class="row-meta ${aiCls}">${h(aiWord)}</div></div>`;
+    }
+    const nf = (s && s.news_flag) || null;
+    let newsFlagLine = "";
+    if (nf && nf.summary) {
+      const nfCls = nf.severity === "red_flag" ? "fail" : "warn";
+      const nfWord = nf.severity === "red_flag" ? "Varning" : "Notis";
+      newsFlagLine = `<div class="row"><div class="row-body"><div class="row-title">Nyhetsvakt (Grok)</div><div class="row-sub">${h(nf.summary)}</div></div><div class="row-meta ${nfCls}">${h(nfWord)}</div></div>`;
+    }
+
     return `
       <div class="card safety-card" id="coin-safety">
         <div class="card-h">Säkerhetskontroll <span class="safety-verdict ${cls}">${h(verdictLabel)}</span></div>
         ${skepticLine}
+        ${aiLine}
+        ${newsFlagLine}
         ${scoreLine}
         ${checkBlock}
       </div>

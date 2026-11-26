@@ -19,6 +19,10 @@
     meme_test: "#FF7AD9",
     newsfeed: "#FFD60A",
     social: "#64D2FF",
+    skeptic: "#FF9F0A",
+    ai_news: "#FF453A",
+    ai_grok: "#64D2FF",
+    ai_claude: "#BF5AF2",
     assets: "#FFD60A"
   };
   const BOT_META = {
@@ -41,6 +45,10 @@
     meme_test: { label: "Test-pott", emoji: "🧪" },
     newsfeed: { label: "Nyhetsboten", emoji: "📰" },
     social: { label: "X-kollen", emoji: "📣" },
+    skeptic: { label: "Skeptiker", emoji: "🤨" },
+    ai_news: { label: "Nyhetsvakt", emoji: "🚨" },
+    ai_grok: { label: "Grok", emoji: "🔎" },
+    ai_claude: { label: "Claude", emoji: "🧠" },
     Du: { label: "Du", emoji: "👤" }
   };
   function botMeta(name) {
@@ -1135,7 +1143,7 @@
       const b = it.from_bot;
       if (b && !seen.has(b)) { seen.add(b); bots.push(b); }
     });
-    const order = ["Du", "newsfeed", "social", "analyst", "scanner", "whale", "risk", "meme_test", "majors", "assets"];
+    const order = ["Du", "ai_news", "newsfeed", "skeptic", "ai_grok", "ai_claude", "social", "analyst", "scanner", "whale", "risk", "meme_test", "majors", "assets"];
     bots.sort((a, b) => {
       const ia = order.indexOf(a), ib = order.indexOf(b);
       return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b);
