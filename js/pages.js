@@ -741,6 +741,9 @@
       const days = clock.running_days != null ? clock.running_days : 0;
       const need = clock.required_days || 60;
       const left = clock.days_left != null ? clock.days_left : Math.max(0, need - days);
+      // Calendar days (Europe/Stockholm), same as the owner counts: Dag N of 60 -> 60 - N left.
+      const calDay = clock.calendar_day != null ? clock.calendar_day : Math.min(need, Math.floor(days) + 1);
+      const calLeft = clock.calendar_days_left != null ? clock.calendar_days_left : Math.max(0, need - calDay);
       const pct = Math.max(0, Math.min(100, (days / need) * 100));
       const laneNames = { memecoin: "Memecoins", meme_test: "Test-pott", majors: "Större coins", gold: "Guld", commodities: "Råvaror", stocks: "Aktier" };
       const items = step.items || [];
@@ -749,8 +752,8 @@
       <div class="screen"><div class="page">
         <div class="card live-clock">
           <div class="card-h">Nedräkning till LIVE</div>
-          <div class="clock-days nums">${clock.required_met ? h(need) : ("Dag " + h(Math.min(need, Math.floor(days) + 1)))} <span>av ${h(need)} dagar</span></div>
-          <div class="clock-sub">${clock.required_met ? "60-dagarsregeln är klar." : h(String(left.toFixed(1)).replace(".", ",")) + " dagar kvar i PAPER."}</div>
+          <div class="clock-days nums">${clock.required_met ? h(need) : ("Dag " + h(calDay))} <span>av ${h(need)} dagar</span></div>
+          <div class="clock-sub">${clock.required_met ? "60-dagarsregeln är klar." : h(String(calLeft)) + " dagar kvar i PAPER."}</div>
           <div class="mood-lane-track"><span class="mood-lane-fill ${clock.required_met ? "up" : "warn"}" style="width:${pct}%"></span></div>
           <p class="tiny" style="margin-top:10px;line-height:1.4">Appens egen regel: minst ${h(need)} dagar i PAPER. Inget går live förrän varje spår klarar bevisen och du själv skriver LIVE.</p>
         </div>
@@ -781,9 +784,12 @@
       if (days == null) return "";
       const need = clock.required_days || 60;
       const left = clock.days_left != null ? clock.days_left : Math.max(0, need - days);
+      // Calendar days (Europe/Stockholm), same as the owner counts: Dag N of 60 -> 60 - N left.
+      const calDay = clock.calendar_day != null ? clock.calendar_day : Math.min(need, Math.floor(days) + 1);
+      const calLeft = clock.calendar_days_left != null ? clock.calendar_days_left : Math.max(0, need - calDay);
       const lab = clock.required_met
         ? `60 dagar klara · STEP 15 kvar`
-        : `Dag ${Math.floor(days) + 1} av ${need} · ${String(left.toFixed(0))} kvar till LIVE`;
+        : `Dag ${calDay} av ${need} · ${calLeft} kvar till LIVE`;
       return `<a class="live-chip" href="#/live-krav" data-nav="#/live-krav"><span class="t">LIVE</span><span class="s">${h(lab)}</span></a>`;
     }
   };
