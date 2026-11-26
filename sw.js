@@ -1,5 +1,5 @@
 /* Moneymaking G service worker — network-first for the shell (index + JS), cache-first for assets */
-const CACHE = "moneymaking-g-v15.8";
+const CACHE = "moneymaking-g-v15.9";
 const PRECACHE = [
   "./css/app.css",
   "./sounds/kaching.wav",
