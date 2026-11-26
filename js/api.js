@@ -754,7 +754,8 @@
       "stop": "Stop-loss",
       "tp": "Take-profit",
       "owner_override": "Du tog över",
-      "beyond_stop": "Gick förbi stop-loss"
+      "beyond_stop": "Gick förbi stop-loss",
+      "buy volume dried up": "Köpen tog slut – vinst säkrad"
     };
     const key = out.trim();
     if (exact[key] || exact[key.toLowerCase()]) return exact[key] || exact[key.toLowerCase()];
@@ -766,6 +767,7 @@
     });
     out = out.replace(/\bwould_have_stopped\b/ig, "Skulle ha stoppats");
     out = out.replace(/\bstop\s*-?\s*(\d+(?:[.,]\d+)?)\s*%/ig, function (_, n) { return "Stop-loss −" + n.replace(".", ",") + " %"; });
+    out = out.replace(/\bbuy volume dried up\b/ig, "Köpen tog slut – vinst säkrad");
     out = out.replace(/\btime stop\s+(\d+)\s*h\b/ig, "Tidsstopp efter $1 h");
     out = out.replace(/\btake profit\s+\+?(\d+(?:[.,]\d+)?)\s*%/ig, function (_, n) { return "Take-profit +" + n.replace(".", ",") + " %"; });
     out = out.replace(/\btake profit\s+(\d+(?:[.,]\d+)?)\s*x\b/ig, function (_, n) { return "Take-profit " + n.replace(".", ",") + "×"; });
@@ -784,7 +786,8 @@
         whale_buy: "whale-köp",
         meme_test: "meme-test",
         take_profit: "take-profit",
-        stop_loss: "stop-loss"
+        stop_loss: "stop-loss",
+        buy_volume_dried_up: "Köpen tog slut – vinst säkrad"
       };
       return words[tok] || tok.replace(/_/g, " ");
     });
